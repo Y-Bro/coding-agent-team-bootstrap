@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DEFAULT_MESSAGE_TYPES } from "../a2a/index.ts";
 
 const Worktree = z.object({ branch: z.string(), path: z.string() });
 
@@ -28,7 +29,7 @@ export const TeamConfigSchema = z.object({
   broker: Broker,
   agents: z.array(Agent).min(1),
   windows: z.array(z.string()).default([]),
-  messageTypes: z.array(z.string()).optional(),
+  messageTypes: z.array(z.string()).default([...DEFAULT_MESSAGE_TYPES]),
 }).superRefine((cfg, ctx) => {
   const seen = new Set<string>();
   for (const a of cfg.agents) {

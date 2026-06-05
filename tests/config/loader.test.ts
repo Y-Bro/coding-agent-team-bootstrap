@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadConfig } from "../../src/config/index.ts";
+import { DEFAULT_MESSAGE_TYPES } from "../../src/a2a/index.ts";
 
 test("loadConfig parses and defaults a valid team.yaml", () => {
   const cfg = loadConfig("tests/config/fixtures/todo.yaml");
@@ -11,6 +12,11 @@ test("loadConfig parses and defaults a valid team.yaml", () => {
   assert.equal(fe.worktree?.branch, "feat/frontend");
   assert.deepEqual(fe.capabilities, ["frontend", "react"]);
   assert.deepEqual(cfg.agents[0]!.subscribes, []);
+});
+
+test("loadConfig defaults messageTypes to the A2A vocabulary when omitted", () => {
+  const cfg = loadConfig("tests/config/fixtures/todo.yaml");
+  assert.deepEqual(cfg.messageTypes, [...DEFAULT_MESSAGE_TYPES]);
 });
 
 test("loadConfig throws on duplicate agent ids", () => {
