@@ -1,0 +1,61 @@
+export type Cli = "claude" | "codex";
+
+export interface AgentCard {
+  id: string;
+  role: string;
+  cli: Cli;
+  capabilities: string[];
+  skills: string[];
+  workdir: string;
+  subscribes: string[];
+}
+
+export type Part =
+  | { kind: "text"; text: string }
+  | { kind: "data"; data: unknown }
+  | { kind: "file"; path: string };
+
+export interface Message {
+  id: string;
+  task?: string;
+  from: string;
+  to: string;
+  type: string;
+  parts: Part[];
+  ts: string;
+}
+
+export type TaskState =
+  | "submitted" | "working" | "input-required"
+  | "completed" | "failed" | "canceled";
+
+export interface Task {
+  id: string;
+  title: string;
+  state: TaskState;
+  owner: string;
+  history: Message[];
+  artifacts: Part[];
+}
+
+export const DEFAULT_MESSAGE_TYPES = [
+  "review_request", "review_comment", "approval", "escalation",
+  "ruling", "status", "task_assignment", "note",
+] as const;
+
+export function isPart(p: unknown): p is Part {
+  if (typeof p !== "object" || p === null) return false;
+  const k = (p as { kind?: unknown }).kind;
+  return k === "text" || k === "data" || k === "file";
+}
+
+export function isMessage(m: unknown): m is Message {
+  if (typeof m !== "object" || m === null) return false;
+  const x = m as Record<string, unknown>;
+  return (
+    typeof x.id === "string" && typeof x.from === "string" &&
+    typeof x.to === "string" && typeof x.type === "string" &&
+    typeof x.ts === "string" &&
+    Array.isArray(x.parts) && x.parts.every(isPart)
+  );
+}
