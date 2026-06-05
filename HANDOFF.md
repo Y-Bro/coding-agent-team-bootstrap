@@ -10,12 +10,34 @@
 1. This file.
 2. `docs/superpowers/specs/2026-06-06-agent-bootstrap-design.md` — the full,
    approved design spec (architecture, data model, `team.yaml`, milestones).
+3. `docs/superpowers/plans/2026-06-06-agent-bootstrap-implementation.md` — the
+   bite-sized, TDD implementation plan (6 milestones). **This is what the writer
+   executes.**
+
+> Note: `docs/`, role files (`CLAUDE.md`/`AGENTS.md`), and `.coord/` are
+> **gitignored / local-only** — `main` tracks only the framework deliverable so
+> no role file clobbers `main` on merge.
 
 ## Current state
 - Repo: `~/Desktop/workspace/AI/agent-bootstrap`, branch `main`.
-- Committed: `.gitignore`, the design spec, this handoff, a pointer `CLAUDE.md`.
-- No source code yet. Implementation has **not** started.
+- Tracked on `main`: `.gitignore`, `HANDOFF.md`, `start.sh`. (Spec, plan, and
+  role files are local/gitignored.)
+- **Design approved + implementation plan written.** No source code yet — the
+  writer starts at Task 1 (project scaffold) toward milestone `m1-config`.
+- **Build team is set up** (see below). Launch with `./start.sh`.
 - Git commits in this project use `--no-verify` (see Conventions).
+
+## Build team — ready to launch
+- `start.sh` opens tmux session `bootstrap`: `lead` (you, repo root, `main`),
+  `code` window = writer (Claude) | reviewer (Codex) split, `build` shell.
+- Writer + reviewer share the worktree `../agent-bootstrap-build` on branch
+  `feat/bootstrap` (lead stays on `main`).
+- Role files (local): root `CLAUDE.md` = lead; worktree `CLAUDE.md` = writer
+  (Claude auto-reads); worktree `AGENTS.md` = reviewer (Codex auto-reads).
+- Protocol: `../agent-bootstrap-build/.coord/{README,REVIEW_QUEUE,REVIEW_COMMENTS,ESCALATIONS}.md`
+  (append-only). Reviewer approves with `## APPROVED <ts> <sha>`.
+- Branching (spec §11): writer commits small on `feat/bootstrap`; on approval the
+  lead merges `--no-ff` to `main`, tags `m<N>-<name>`, merges `main` back.
 
 ## What we're building (one paragraph)
 A config-driven framework that bootstraps a multi-agent **team** of CLI coding
