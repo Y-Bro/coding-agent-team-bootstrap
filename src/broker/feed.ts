@@ -1,7 +1,12 @@
 import type { FileSystem } from "../ports/fs.ts";
 import type { Message } from "../a2a/index.ts";
 
-export class FeedRenderer {
+/** Narrow contract for appending a message to the human-readable feed. */
+export interface FeedWriter {
+  append(m: Message): void;
+}
+
+export class FeedRenderer implements FeedWriter {
   constructor(private fs: FileSystem, private path: string) {}
 
   append(m: Message): void {

@@ -1,8 +1,8 @@
 import type { AgentCard, Message, Part } from "../a2a/index.ts";
 import type { MessageStore } from "./store.ts";
-import type { AgentRegistry } from "./registry.ts";
-import type { Router } from "./router.ts";
-import type { FeedRenderer } from "./feed.ts";
+import type { AgentDirectory } from "./registry.ts";
+import type { MessageRouter } from "./router.ts";
+import type { FeedWriter } from "./feed.ts";
 import type { Runtime } from "../runtime/runtime.ts";
 import type { Clock } from "../ports/clock.ts";
 import type { IdGenerator } from "../ports/ids.ts";
@@ -17,9 +17,9 @@ export interface SendInput {
 
 export interface BrokerDeps {
   store: MessageStore;
-  registry: AgentRegistry;
-  router: Router;
-  feed: FeedRenderer;
+  registry: AgentDirectory;
+  router: MessageRouter;
+  feed: FeedWriter;
   runtime: Runtime;
   clock: Clock;
   ids: IdGenerator;

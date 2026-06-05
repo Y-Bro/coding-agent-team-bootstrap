@@ -1,6 +1,14 @@
 import type { AgentCard } from "../a2a/index.ts";
 
-export class AgentRegistry {
+/** Narrow contract for looking up and registering agent cards. */
+export interface AgentDirectory {
+  register(card: AgentCard): void;
+  has(id: string): boolean;
+  get(id: string): AgentCard | undefined;
+  all(): AgentCard[];
+}
+
+export class AgentRegistry implements AgentDirectory {
   private byId = new Map<string, AgentCard>();
 
   register(card: AgentCard): void { this.byId.set(card.id, card); }
