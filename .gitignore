@@ -2,5 +2,8 @@ node_modules/
 dist/
 .team/
 docs/
+.coord/
+CLAUDE.md
+AGENTS.md
 *.log
 .DS_Store
