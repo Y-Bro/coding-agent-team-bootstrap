@@ -1,0 +1,19 @@
+name: todo
+root: .
+runtime: panes
+broker: { transport: unix, socket: .team/broker.sock }
+agents:
+  - { id: lead, role: lead, cli: claude, workdir: ., template: lead }
+  - id: fe-writer
+    role: writer
+    cli: claude
+    worktree: { branch: feat/frontend, path: frontend }
+    template: writer
+    capabilities: [frontend, react]
+    subscribes: [review_comment, ruling]
+  - id: fe-reviewer
+    role: reviewer
+    cli: codex
+    workdir: frontend
+    subscribes: [review_request]
+windows: [servers, git]
