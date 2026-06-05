@@ -1,0 +1,4 @@
+name: t
+agents:
+  - { id: a, role: writer, cli: claude }
+  - { id: a, role: reviewer, cli: codex }
