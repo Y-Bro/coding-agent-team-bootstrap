@@ -1,0 +1,38 @@
+import type { SocketServer } from "../ports/transport.ts";
+import type { Broker } from "./broker.ts";
+import type { Request, Response } from "./protocol.ts";
+
+/** Bridges the socket transport to Broker methods. Pure dispatch, injectable server. */
+export class BrokerDaemon {
+  constructor(private broker: Broker, private server: SocketServer) {}
+
+  async start(socketPath: string): Promise<void> {
+    await this.server.listen(socketPath, (raw, reply) => {
+      void this.handle(raw as Request).then(reply);
+    });
+  }
+
+  async stop(): Promise<void> {
+    await this.server.close();
+  }
+
+  private async handle(req: Request): Promise<Response> {
+    try {
+      switch (req.method) {
+        case "agent/register":
+          this.broker.register(req.params.card);
+          return { ok: true, result: null };
+        case "agent/list":
+          return { ok: true, result: this.broker.agents() };
+        case "message/send":
+          return { ok: true, result: await this.broker.send(req.params) };
+        case "inbox/read":
+          return { ok: true, result: this.broker.inbox(req.params.agentId) };
+        default:
+          return { ok: false, error: `unknown method` };
+      }
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
+  }
+}
