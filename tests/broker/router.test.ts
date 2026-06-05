@@ -29,8 +29,15 @@ test("routes by capability", () => {
   assert.deepEqual(fixture().resolve("frontend", "note"), ["fe-writer"]);
 });
 
-test("includes subscribers of the message type", () => {
-  assert.ok(fixture().resolve("reviewer", "review_request").includes("fe-reviewer"));
+test("includes subscribers of the message type even when they don't match 'to'", () => {
+  // fe-writer subscribes to 'ruling' but is not the 'lead' id/role/capability.
+  assert.deepEqual(fixture().resolve("lead", "ruling").sort(), ["fe-writer", "lead"]);
+});
+
+test("delivers to a pure subscriber with no other 'to' match", () => {
+  // fe-reviewer subscribes to 'review_request'; 'review_request' is not an
+  // id/role/capability, so only the subscription can route it.
+  assert.deepEqual(fixture().resolve("review_request", "review_request"), ["fe-reviewer"]);
 });
 
 test("throws on unknown target", () => {
