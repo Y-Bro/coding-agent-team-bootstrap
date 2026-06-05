@@ -45,8 +45,13 @@ export const DEFAULT_MESSAGE_TYPES = [
 
 export function isPart(p: unknown): p is Part {
   if (typeof p !== "object" || p === null) return false;
-  const k = (p as { kind?: unknown }).kind;
-  return k === "text" || k === "data" || k === "file";
+  const x = p as Record<string, unknown>;
+  switch (x.kind) {
+    case "text": return typeof x.text === "string";
+    case "data": return "data" in x;
+    case "file": return typeof x.path === "string";
+    default: return false;
+  }
 }
 
 export function isMessage(m: unknown): m is Message {
