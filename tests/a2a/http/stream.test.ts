@@ -4,7 +4,9 @@ import {
   encodeSseFrame, encodeSseStream, parseSseFrames,
   registerStreamRoute, streamMessage, SSE_CONTENT_TYPE, type StreamEvent,
 } from "../../../src/a2a/http/stream.ts";
-import { A2A_PATHS } from "../../../src/a2a/http/types.ts";
+import { A2A_PATHS, JSON_RPC_ERRORS } from "../../../src/a2a/http/types.ts";
+import { BrokerAuthProvider, bearerHeader } from "../../../src/a2a/http/auth.ts";
+import { SeqIds } from "../../ports/fakes.ts";
 import { FakeHttpServer, FakeHttpClient } from "./fakes.ts";
 import type { Message } from "../../../src/a2a/index.ts";
 
@@ -51,6 +53,32 @@ test("the stream route is registered at the SSE path", () => {
   const server = new FakeHttpServer();
   registerStreamRoute(server, { onMessageStream: () => [] });
   assert.ok(server.routes.has(`POST ${A2A_PATHS.rpcStream}`));
+});
+
+test("with auth: message/stream accepts a valid bearer and rejects missing/invalid", async () => {
+  const auth = new BrokerAuthProvider(new SeqIds());
+  const token = auth.issueToken("fe-writer");
+  const server = new FakeHttpServer();
+  registerStreamRoute(server, { onMessageStream: () => [{ event: "done", data: { ok: true } }] }, auth);
+
+  // valid token via the client helper round-trips frames
+  const client = new FakeHttpClient(server, "http://agent");
+  const frames = await streamMessage(client, "http://agent", msg, token);
+  assert.deepEqual(frames.map((f) => f.event), ["done"]);
+
+  // missing bearer -> unauthorized JSON-RPC error (not SSE)
+  const noAuth = await server.handle({
+    method: "POST", path: A2A_PATHS.rpcStream,
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "message/stream", params: { message: msg } }),
+  });
+  assert.equal(JSON.parse(noAuth.body).error.code, JSON_RPC_ERRORS.unauthorized);
+
+  // invalid bearer -> unauthorized
+  const badAuth = await server.handle({
+    method: "POST", path: A2A_PATHS.rpcStream, headers: bearerHeader("bogus"),
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "message/stream", params: { message: msg } }),
+  });
+  assert.equal(JSON.parse(badAuth.body).error.code, JSON_RPC_ERRORS.unauthorized);
 });
 
 test("the stream route serves content-type text/event-stream", async () => {

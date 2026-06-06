@@ -1,6 +1,7 @@
 import type { HttpServer, HttpClient } from "../../ports/http.ts";
 import type { Message } from "../index.ts";
-import { A2A_PATHS, A2A_METHOD_MESSAGE_STREAM } from "./types.ts";
+import { A2A_PATHS, A2A_METHOD_MESSAGE_STREAM, JSON_RPC_ERRORS } from "./types.ts";
+import { authorize, bearerHeader, type AuthProvider } from "./auth.ts";
 
 /** Content type for an SSE response. */
 export const SSE_CONTENT_TYPE = "text/event-stream";
@@ -49,14 +50,21 @@ export interface A2AStreamHandler {
 }
 
 /** Register the `message/stream` SSE route on the injected HttpServer. */
-export function registerStreamRoute(http: HttpServer, handler: A2AStreamHandler): void {
+export function registerStreamRoute(http: HttpServer, handler: A2AStreamHandler, auth?: AuthProvider): void {
   http.route("POST", A2A_PATHS.rpcStream, async (req) => {
-    let message: Message | undefined;
+    let parsed: { id?: string | number | null; params?: { message?: Message } };
     try {
-      message = (JSON.parse(req.body) as { params?: { message?: Message } }).params?.message;
+      parsed = JSON.parse(req.body) as typeof parsed;
     } catch {
       return { status: 400, body: "" };
     }
+    if (auth && !authorize(req.headers, auth).ok) {
+      return {
+        status: 200,
+        body: JSON.stringify({ jsonrpc: "2.0", id: parsed.id ?? null, error: { code: JSON_RPC_ERRORS.unauthorized, message: "missing or invalid bearer token" } }),
+      };
+    }
+    const message = parsed.params?.message;
     if (!message) return { status: 400, body: "" };
     const events = await handler.onMessageStream(message);
     return {
@@ -68,10 +76,11 @@ export function registerStreamRoute(http: HttpServer, handler: A2AStreamHandler)
 }
 
 /** Client-side: send a message via `message/stream` and parse the SSE event sequence. */
-export async function streamMessage(http: HttpClient, baseUrl: string, message: Message): Promise<StreamEvent[]> {
+export async function streamMessage(http: HttpClient, baseUrl: string, message: Message, token?: string): Promise<StreamEvent[]> {
   const res = await http.request(baseUrl + A2A_PATHS.rpcStream, {
     method: "POST",
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: A2A_METHOD_MESSAGE_STREAM, params: { message } }),
+    headers: token !== undefined ? bearerHeader(token) : undefined,
   });
   return parseSseFrames(res.body);
 }
