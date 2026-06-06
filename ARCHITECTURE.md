@@ -20,10 +20,22 @@ broker/routing/persistence core works under two runtimes:
   its own **A2A-over-HTTP** endpoint; the broker pushes messages to each agent's
   webhook (or calls `message/send` over JSON-RPC), all throttled by a shared
   fleet rate-limiter.
+- **mixed** (v3) — a single team can host some agents on `panes` and others on
+  `servers` (per-agent `runtime:`); a `CompositeRuntime` + `CompositeTransport`
+  bridge the two so messages cross the boundary transparently.
 
 Everything (config schema, A2A model, broker, CLI, persistence) is shared between
-the two; only the `Runtime` and broker `Transport` implementations differ, and
-they are chosen in one place (`src/compose.ts`).
+the runtimes; only the `Runtime` and broker `Transport` implementations differ,
+and they are chosen in one place (`src/compose.ts`).
+
+Beyond broker-mediated routing, v3 adds **direct peer-to-peer A2A** delivery
+(`delivery: direct`, servers only): the sender resolves the recipient from
+published Agent Cards and calls its A2A endpoint directly, while the broker stays
+the **registry, durable log, and observer** (so rebuild-from-log still works).
+v3 also adds **multi-host** addressing (config-derived Agent Card URLs, a
+`DiscoveryProvider` seam, opt-in TLS), **token expiry + rotation** on the bearer
+auth, and an **opt-in read-only dashboard** (HTTP + SSE) — all behind the same
+seams.
 
 ## Entry point & control flow
 
@@ -119,33 +131,57 @@ BrokerDaemon ─▶ Broker.send
             agent's A2AServer handles the message
 ```
 
-Note the broker is **mediated** in both modes — there is no direct
-agent-to-agent A2A in v1/v2 (recipients still route through the broker). Direct
-A2A and mixed/multi-host runtimes are deferred to v3.
+### Message flow — direct A2A (v3, `delivery: direct`)
+
+```
+agent (DirectMessenger.send)
+   │  resolve recipients client-side from published Agent Cards (Router)
+   ▼
+A2AClient.sendMessage → JSON-RPC POST /a2a   (peer-to-peer, broker NOT in the path)
+   │
+   └─▶ Broker.observe(msg)   (one copy: JsonlStore.append + FeedRenderer.append + inbox)
+```
+
+Direct delivery is peer-to-peer, but the broker still **observes** every message
+(a single copy via the transport-agnostic `MessageObserver` seam), so the durable
+log, feed, and rebuild-from-log stay complete. In mixed teams the
+`CompositeTransport` routes each message by the **recipient's** runtime (socket
+for pane agents, A2A for server agents), bridging the two. `delivery: direct`
+requires every effective runtime to be `servers`.
 
 ## Folder-by-folder
 
 - **`src/a2a/`** — the A2A data model (`types.ts`) and the A2A-over-HTTP wire
-  layer (`http/`): JSON-RPC types, server, client, SSE streaming, bearer auth,
-  and HTTP-429 rate-limit translation.
-- **`src/config/`** — the Zod `team.yaml` schema and the YAML loader.
+  layer (`http/`): JSON-RPC types, server, client, SSE streaming, bearer auth
+  (with expiry/rotation + `SecretSource`), and HTTP-429 rate-limit translation.
+  Plus `direct.ts` (peer-to-peer `DirectMessenger`) and `discovery.ts` (the
+  multi-host `DiscoveryProvider` seam + config URL stamping).
+- **`src/config/`** — the Zod `team.yaml` schema, the YAML loader, and
+  `resolve.ts` (run-from-anywhere base-dir + path resolution).
 - **`src/ports/`** — side-effect seams + their Node-backed concretes (and a few
   test fakes like `FakeWhich`, `ScriptedPrompter`).
 - **`src/broker/`** — the message broker core: persistence (`store`), directory
-  (`registry`), routing (`router`), the `Broker` itself, the wire protocol, the
-  human feed, the socket daemon, the two transports, and the task state machine.
+  (`registry`), routing (`router`), the `Broker` (incl. its observer role), the
+  wire protocol, the human feed, the socket daemon, the transports
+  (`SocketTransport`, `A2ATransport`, `CompositeTransport`), the pub/sub
+  `MessageBus`, and the task state machine + `projectTasks` projection.
+- **`src/dashboard/`** — the opt-in read-only observability server (`server.ts`)
+  and its static vanilla-JS client (`client.ts`).
 - **`src/client/`** — the operator/agent side: `BrokerClient` RPC, the commander
   CLI, and the `team up`/`down` lifecycle.
-- **`src/runtime/`** — the `Runtime` seam, `PanesRuntime`, `selectRuntime`, and
-  the `servers/` runtime (process-backed agents + the `FleetScheduler`).
-- **`src/bootstrap/`** — turning config into a running team: topology plan, role
-  cards + role-file rendering, worktree creation, the `doctor` probe, and the
-  `Bootstrapper` orchestrator.
+- **`src/runtime/`** — the `Runtime` seam, `PanesRuntime`, `CompositeRuntime`
+  (mixed teams), `selectRuntime`, and the `servers/` runtime (process-backed
+  agents + the `FleetScheduler`).
+- **`src/bootstrap/`** — turning config into a running team: topology plan
+  (base-dir resolved), role cards + role-file rendering, worktree creation, the
+  `doctor` probe, and the `Bootstrapper` orchestrator (URL-stamped cards).
 - **`src/engines/`** — the `EngineProfile` model and the built-in/overridable
   engine registry.
 - **`src/cli/`** — the interactive `init` wizard and the `doctor` report
   formatter.
 - **`src/compose.ts`** — the single composition root.
+- **`examples/`** — the self-bootstrap dogfood (`agent-bootstrap-team.yaml`): a
+  meta `team.yaml` that reproduces this repo's own lead/writer/reviewer team.
 
 ## File-by-file reference
 
@@ -191,11 +227,27 @@ Server-Sent-Events flavour of `message/stream`, plus SSE codec helpers.
 - `function streamMessage(http, baseUrl, message, token?)` — client: POST and parse the SSE sequence.
 
 ### `src/a2a/http/auth.ts`
-Per-agent bearer tokens (localhost trust scope).
+Per-agent bearer tokens (localhost trust scope) with v3 expiry + rotation.
 - `interface AuthProvider` — `issueToken(agentId)` / `validate(token)`.
+- `interface Rotatable` — `rotate(agentId)`: issue a fresh token and invalidate the prior one.
+- `interface SecretSource` + `class InProcessSecret` — where the signing secret comes from (default: random in-process; never hardcoded).
+- `interface JwtTokenSigner` / `interface MutualTlsAuth` — clearly-marked unimplemented seams (JWT/mTLS deferred per Q5).
 - `function bearerToken(headers)` / `bearerHeader(token)` — extract / build the Authorization header.
 - `type AuthResult` + `function authorize(headers, auth)` — validate the presented bearer.
-- `class BrokerAuthProvider` — ctor `(ids)`; in-memory token↔agent store.
+- `class BrokerAuthProvider` — ctor `(ids, { clock?, ttlSec?, secret? })`; in-memory token↔agent store; rejects expired tokens (clock-based) and supports `rotate`.
+
+### `src/a2a/direct.ts`
+Direct peer-to-peer A2A delivery (v3-m1, `delivery: direct`).
+- `interface Messenger` — `send(input)`.
+- `interface DirectMessengerDeps` — `{ router, endpoints, observer }`.
+- `class DirectMessenger` — resolves recipients client-side via the `Router` over published Agent Cards, sends to each recipient's A2A endpoint directly, and posts ONE `observer.observe(m)` copy so the broker's durable log + feed stay complete. The broker is the observer, never in the delivery path.
+
+### `src/a2a/discovery.ts`
+Multi-host address resolution (v3-m3).
+- `interface DiscoveryProvider` — `resolve(agentId): string | undefined`.
+- `class StaticDiscovery` — config-derived URL map; `const NoopDiscovery` — no-op default.
+- `function agentUrls(cfg)` — per-agent reachable URL from `url` / `host`+port / `servers.host`+`basePort`.
+- `function staticDiscoveryFromConfig(cfg)` / `function stampUrl(discovery, card)` — build discovery from config; stamp a card's `url` (single source of truth for register + on-disk card + spawn).
 
 ### `src/a2a/http/ratelimit.ts`
 Translate an HTTP 429 into a thrown signal the scheduler understands (no upward dependency on the runtime).
@@ -214,8 +266,13 @@ The Zod `team.yaml` schema and inferred types.
 ### `src/config/loader.ts`
 - `function loadConfig(path): TeamConfig` — read+parse YAML, `safeParse` against the schema, throw a descriptive error on failure.
 
+### `src/config/resolve.ts`
+Run-from-anywhere path resolution (v2.1.0).
+- `function resolveBase(cfg, configPath)` — the base dir all relative paths resolve against: `cfg.root` if set, else the config file's directory, else cwd.
+- `function resolveConfigPaths(cfg, base)` — rewrite relative paths (broker socket, agent workdirs/worktrees, TLS cert/key/ca) to absolute against the base, so the CLI works from any directory.
+
 ### `src/config/index.ts`
-Barrel: re-exports the schema/types and `loadConfig`.
+Barrel: re-exports the schema/types, `loadConfig`, and the resolvers.
 
 ### `src/ports/clock.ts`
 - `interface Clock` — `now()` / `isoNow()`.
@@ -283,9 +340,10 @@ Unix-socket seams + concretes (newline-delimited JSON).
 - `class Router` — ctor `(registry)`; resolves `to` (agent id | role | capability) + subscribers of `type` to recipient ids; throws if nothing matches.
 
 ### `src/broker/broker.ts`
-The broker core.
+The broker core (plus its v3 observer role).
 - `interface SendInput` / `interface BrokerDeps` / `interface BrokerDispatch`.
-- `class Broker` — ctor `(deps)`; `register`, `agents`, `send` (route → stamp id/ts → store → feed → per-recipient inbox enqueue + `transport.deliver`), `inbox` (drain), `rebuild` (replay log into inboxes, no re-wake/re-append).
+- `interface MessageObserver` — `observe(message)`: record a message that was already delivered peer-to-peer (the broker's observer role for `delivery: direct`, NOT in the delivery path).
+- `class Broker` — ctor `(deps)`; `register`, `agents`, `send` (route → stamp id/ts → store → feed → per-recipient inbox enqueue + `transport.deliver` + optional `publisher` fan-out), `observe` (store + feed + inbox + publish, no transport delivery), `inbox` (drain), `rebuild` (replay log into inboxes, no re-wake/re-append). An optional `MessagePublisher` (the `MessageBus`) is notified of every recorded message — the read-only dashboard's live feed.
 
 ### `src/broker/protocol.ts`
 The socket wire protocol.
@@ -310,10 +368,20 @@ The socket wire protocol.
 - `interface WebhookSender` — `push(recipient, message)`.
 - `class A2ATransport` — ctor `(endpoints, webhook?, scheduler?)`; v2 transport: `deliver` runs through the `Scheduler` (when set), then pushes to the webhook (or falls back to `sendMessage`).
 
+### `src/broker/composite-transport.ts`
+- `class CompositeTransport` — ctor `(byRuntime, runtimeOf)`; v3 mixed-team transport. `deliver` picks the underlying transport (socket vs A2A) by the **recipient's** effective runtime, so a pane agent and a server agent in the same team exchange messages both directions.
+
+### `src/broker/bus.ts`
+In-process pub/sub for the read-only dashboard's live feed (v3-m4).
+- `interface MessagePublisher` — `publish(message)`.
+- `interface MessageSubscriber` — `subscribe(listener): unsubscribe`.
+- `class MessageBus` — implements both; the broker publishes every recorded message, the dashboard's SSE endpoint subscribes.
+
 ### `src/broker/tasks.ts`
 The A2A Task state machine, persisted over the same JSONL log.
 - `const TASK_EVENT_TYPE = "task_status"`.
-- `class TaskMachine` — ctor `(store, clock, ids)`; `create({title,owner})` → `submitted`; `transition(taskId, to)` (rejects illegal/terminal transitions); `get`/`all`; `rebuild()` replays `task_status` events from the log.
+- `function projectTasks(messages)` — pure projection: fold a message stream into the current `Task[]`. Shared by `TaskMachine.rebuild()` and the dashboard's task view (single source of truth, no divergent logic).
+- `class TaskMachine` — ctor `(store, clock, ids)`; `create({title,owner})` → `submitted`; `transition(taskId, to)` (rejects illegal/terminal transitions); `get`/`all`; `rebuild()` replays `task_status` events from the log via `projectTasks`.
 
 ### `src/client/rpc.ts`
 - `class BrokerClient` — ctor `(transport, socketPath)`; `send/inbox/list/register` over the socket protocol; maps connect failures to `"broker down — run \`team up\`"`.
@@ -332,10 +400,15 @@ The A2A Task state machine, persisted over the same JSONL log.
 - `interface Runtime` — `spawn(agent, ctx)` / `wake(agentId, summary)` / `teardown()`. (Heavily documented as the extension point.)
 
 ### `src/runtime/panes.ts`
-- `class PanesRuntime` — ctor `(tmux, session, engines)`; `spawn` opens a tmux window and launches the engine command with `TEAM_AGENT_ID`/`TEAM_SOCKET` + profile env/args; `wake` sends a one-line `send-keys` mail hint; `teardown` kills the session.
+- `class PanesRuntime` — ctor `(tmux, session, engines, layout?)`; `spawn` places each agent in a tmux window — agents sharing a `window:` value become **split panes** in one window (with the configured `layout`, default `even-horizontal`), captured by stable pane id so `wake` targets the right pane; agents with no `window` get one window each (back-compat). `wake` sends a one-line `send-keys` mail hint; `teardown` kills the session.
 
 ### `src/runtime/select.ts`
-- `function selectRuntime(cfg, tmux, engines, makeServersRuntime)` — `panes` → `PanesRuntime`; `servers` → validate every agent's engine is `kind:"server"` then build via the factory.
+- `function effectiveRuntime(cfg, agent)` — the agent's runtime: its own `runtime:` else the team-level `cfg.runtime`.
+- `function selectRuntime(cfg, tmux, engines, makeServersRuntime)` — `panes` → `PanesRuntime`; `servers` → validate every (server-bound) agent's engine is `kind:"server"` then build via the factory; **mixed** → a `CompositeRuntime` over both.
+
+### `src/runtime/composite.ts`
+- `type RuntimeKind = "panes" | "servers"`.
+- `class CompositeRuntime` — ctor `(byKind, runtimeOf)`; routes each agent's `spawn`/`wake` to its assigned runtime and `teardown`s all; powers mixed-runtime teams.
 
 ### `src/runtime/servers/servers.ts`
 - `interface AgentLink` — `register(card)` / `notify(card, summary)`.
@@ -351,7 +424,7 @@ The A2A Task state machine, persisted over the same JSONL log.
 
 ### `src/bootstrap/topology.ts`
 - `interface PaneSpec` / `TopologyPlan`.
-- `function planTopology(cfg)` — derive the tmux session, per-agent panes (workdir = worktree path or workdir), and extra windows.
+- `function planTopology(cfg, base?)` — derive the tmux session, per-agent panes (workdir = worktree path or workdir, resolved against the base dir), window grouping, and extra windows.
 
 ### `src/bootstrap/roles.ts`
 - `function roleFileName(agent, engines)` — the file the engine auto-reads (e.g. `CLAUDE.md`), from the engine profile.
@@ -359,15 +432,15 @@ The A2A Task state machine, persisted over the same JSONL log.
 - `function renderRoleFile(template, a)` — minimal `{{id}}/{{role}}/{{cli}}/{{workdir}}/{{capabilities}}/{{subscribes}}` substitution.
 
 ### `src/bootstrap/worktrees.ts`
-- `function createWorktrees(cfg, git)` — create a branch+worktree per agent that declares one; idempotent (skips existing/registered/shared paths).
+- `function createWorktrees(cfg, git)` — create a branch+worktree per agent that declares one; idempotent (skips existing/registered/shared paths). Returns early WITHOUT touching git when no agent declares a worktree, so `team up` works in non-git directories (v2.1.2); a missing repo when worktrees *are* declared gives a clear "worktrees require a git repo" error.
 
 ### `src/bootstrap/doctor.ts`
 - `interface DoctorInput` / `DoctorReport`.
 - `function runDoctor(input)` — probe core tools (`tmux`, `git`, `node`) as blockers + per-engine presence.
 
 ### `src/bootstrap/bootstrapper.ts`
-- `interface BootstrapDeps` — `{ runtime, git, fs, engines, templates }`.
-- `class Bootstrapper` — ctor `(cfg, deps)`; `up(socketPath)` creates worktrees, writes each card to `.team/cards/<id>.json`, renders+writes each role file, then spawns each agent via the runtime; `down()` tears the runtime down.
+- `interface BootstrapDeps` — `{ runtime, git, fs, engines, templates, register, stampCard? }`.
+- `class Bootstrapper` — ctor `(cfg, deps)`; `up(socketPath)` creates worktrees, then for each agent stamps the card ONCE (via `stampCard`, the multi-host URL stamper) and uses that identical URL-bearing card to register with the broker, write `.team/cards/<id>.json`, and spawn — single source of truth (v3-m3). Renders+writes each role file (with a clobber guard for shared-workdir same-engine agents). `down()` tears the runtime down.
 
 ### `src/engines/profile.ts`
 - `type EngineKind = "repl" | "server"`.
@@ -389,9 +462,17 @@ Barrel: profile + registry.
 ### `src/cli/doctor-cmd.ts`
 - `function formatDoctorReport(r)` — render the doctor report as text.
 
+### `src/dashboard/server.ts`
+The opt-in read-only observability server (v3-m4).
+- `interface DashboardDeps` — `{ http, store, registry, bus, ... }`.
+- `class DashboardServer` — serves the static client plus read-only JSON endpoints (agent registry, message feed/log, task states via `projectTasks`) and a live **SSE** stream fed by the `MessageBus`. No control endpoints — strictly read-only. Mounted from the broker process only when `dashboard.enabled`.
+
+### `src/dashboard/client.ts`
+- `const INDEX_HTML` / `const APP_JS` — the static, framework-free dashboard client (served as strings): renders the agent roster, live message feed, and task states, updating over the SSE stream.
+
 ### `src/compose.ts`
 The single composition root.
-- `function buildContainer(cfg, templates)` — wires the whole system; branches panes vs servers (builds `BrokerAuthProvider` + per-agent tokens + `FleetScheduler` + `A2ATransport` for servers, or `SocketTransport` for panes); returns `{ broker, daemon, bootstrapper, runtime, transport }`.
+- `function buildContainer(cfg, templates)` — resolves config paths against the base dir, then wires the whole system: panes / servers / **mixed** (builds a `CompositeRuntime` + `CompositeTransport`); `BrokerAuthProvider` (with `tokenTtlSec`/`secret`/`SecretSource`) + per-agent tokens + `FleetScheduler` + `A2ATransport` for servers, or `SocketTransport` for panes; the `DirectMessenger` when `delivery: direct`; the `MessageBus` + `DashboardServer` when `dashboard.enabled`; `staticDiscoveryFromConfig` + `stampUrl` so cards carry reachable URLs. Returns `{ broker, daemon, bootstrapper, runtime, transport, ... }`.
 - `function runDoctorCommand()` — compose+run `doctor`.
 - `interface InitOptions` + `function runInitCommand(opts, confirmUp)` — probe availability, run the wizard, validate against the schema, write the config.
 - (Internal helpers: `a2aBaseUrl`, `a2aEndpoints`, `a2aWebhook`, `a2aLink` — resolve per-agent URLs/clients/webhooks and the servers-mode broker link.)
@@ -428,20 +509,29 @@ so `rebuild()` reconstructs all task state by replaying the log.
 
 From `config/schema.ts`:
 
-- **top level**: `name` (required), `root` (default `.`), `runtime`
-  (`panes` | `servers`, default `panes`), `windows[]`, `messageTypes[]`
-  (defaults to `DEFAULT_MESSAGE_TYPES`).
+- **top level**: `name` (required), `root` (default `.`; base dir all relative
+  paths resolve against), `runtime` (`panes` | `servers`, default `panes`),
+  `delivery` (`broker` | `direct`, default `broker`; `direct` is servers-only),
+  `windows[]`, `layout` (map of window name → `even-horizontal` | `even-vertical`
+  | `tiled` | `main-vertical`), `messageTypes[]` (defaults to
+  `DEFAULT_MESSAGE_TYPES`).
 - **`broker`**: `transport` (`unix`), `socket` (default `.team/broker.sock`).
 - **`servers`** (servers mode): `host` (default `127.0.0.1`), `basePort`
   (default `41000`; per-agent port = `basePort + index` unless an agent sets
-  `port`), `auth` (default `true`), `rateLimit` (`maxConcurrency` 4,
-  `bucketCapacity` 8, `refillPerSec` 2).
+  `port`), `auth` (default `true`), `tokenTtlSec` (optional token expiry),
+  `secret` (optional signing secret; else random in-process),
+  `rateLimit` (`maxConcurrency` 4, `bucketCapacity` 8, `refillPerSec` 2),
+  `tls` (optional `{ cert, key, ca? }`, paths resolved against `root`).
+- **`dashboard`**: `enabled` (default `false`), `port` (default `41999`) — opt-in
+  read-only HTTP+SSE observability server.
 - **`engines`**: optional map of `name → { command, args?, roleFile, env?, kind }`
   overriding/adding to the built-ins.
 - **`agents[]`** (≥1, unique ids): `id`, `role`, `cli` (`claude`|`codex`,
   default `claude`), `engine` (defaults from `cli`), `workdir` (default `.`),
-  `worktree { branch, path }`, `template`, `capabilities[]`, `skills[]`,
-  `subscribes[]`, `port` (servers override).
+  `worktree { branch, path }`, `template`, `window` (panes: shared window →
+  split panes; default = agent id), `runtime` (mixed teams: per-agent override),
+  `host` / `url` (multi-host: card-advertised address), `capabilities[]`,
+  `skills[]`, `subscribes[]`, `port` (servers override).
 
 ## Persistence & rebuild
 
@@ -468,11 +558,13 @@ Tests are headless: they inject fakes (`MemoryFs`, `FakeWhich`,
 git, sockets, or processes. The `tests/e2e/` suite exercises the real wiring:
 config → bootstrap → broker → daemon over real unix sockets (`team.test.ts`,
 `up.test.ts`, `lifecycle.test.ts`, `cli-entrypoint.test.ts`, `init.test.ts`) and
-servers/A2A-HTTP over loopback (`servers.test.ts`). The e2e tests that need a
-real loopback listen **skip rather than fail** when the sandbox blocks it
-(`EPERM`/`EACCES`/`EADDRNOTAVAIL`) — see `isSandboxNetError` in
+servers/A2A-HTTP over loopback (`servers.test.ts`), direct A2A + observe-wire,
+mixed pane/server teams (`mixed.test.ts`), multi-host URL resolution, the
+read-only dashboard, and the self-bootstrap config (`self-bootstrap.test.ts`).
+The e2e tests that need a real loopback listen **skip rather than fail** when the
+sandbox blocks it (`EPERM`/`EACCES`/`EADDRNOTAVAIL`) — see `isSandboxNetError` in
 `tests/e2e/servers.test.ts`. With dependencies installed, the full suite is
-**149 tests, all passing**.
+**234 tests, all passing**.
 
 ## Build status
 
@@ -482,8 +574,15 @@ real loopback listen **skip rather than fail** when the sandbox blocks it
   the engine registry + profiles): shipped.
 - **v2 — servers / A2A-HTTP** (`ServersRuntime`, A2A HTTP server/client, SSE +
   push webhook, bearer auth, `FleetScheduler`, Task state machine): shipped.
-- **Current tag: `v2.0.1`**. Test suite: ~149 tests passing.
-- **v3 (planned, not built)** —
-  `docs/superpowers/plans/2026-06-06-v3-distributed-observability.md`: direct
-  agent-to-agent A2A, mixed/multi-host runtimes, a web dashboard, and an
-  auth/hardening pass. All of it slots behind the existing seams.
+- **Run-from-anywhere fixes** (`v2.1.0`–`v2.1.2`): per-agent tmux window/pane
+  layout, `root`-anchored path resolution, `team up --detach`, a launcher that
+  boots from any cwd, and `team up` in non-git directories: shipped.
+- **v3 — distributed A2A + observability** (`v3-m1`…`v3-m6`): direct
+  agent-to-agent A2A (broker as observer), mixed-runtime teams (composite
+  runtime/transport bridge), multi-host (config card URLs, discovery seam, opt-in
+  TLS), a read-only HTTP+SSE dashboard, auth hardening (token expiry + rotation),
+  and self-bootstrap dogfood: **shipped**. All of it slots behind the existing
+  seams. Plan:
+  `docs/superpowers/plans/2026-06-06-v3-distributed-observability.md`.
+- **Current tags: `v3-m1`…`v3-m6`** (plus `v2.1.0`–`v2.1.2`). Test suite: 234
+  tests passing.

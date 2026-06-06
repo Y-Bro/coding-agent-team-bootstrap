@@ -13,12 +13,25 @@ parts, and a task state machine.
   message subscriptions all live in `team.yaml`.
 - **Local A2A broker** — routes messages by agent id, role, capability, or
   subscription; persists everything to a JSONL log; renders a human-readable feed.
-- **Two runtimes** — **panes** (each agent in a tmux pane) or **servers** (each
-  agent a process hosting an A2A-over-HTTP endpoint), chosen by one config field.
+- **Two runtimes, mixable** — **panes** (each agent in a tmux pane) or **servers**
+  (each agent a process hosting an A2A-over-HTTP endpoint), chosen by one config
+  field — or **mixed per-agent** in a single team, with the broker bridging the
+  two transports.
+- **Broker-mediated or direct A2A** — messages route through the broker by
+  default; in servers mode you can opt into **direct** peer-to-peer A2A delivery
+  while the broker stays the registry, durable log, and observer.
+- **Multi-host ready** — Agent Cards advertise reachable URLs from config, with a
+  discovery seam and opt-in TLS for cross-host A2A.
+- **Read-only dashboard** — opt-in HTTP+SSE viewer of the live agent roster,
+  message feed, and task states (static vanilla JS, no framework).
+- **Hardened auth** — per-agent bearer tokens with optional expiry + rotation.
+- **Run from anywhere** — install once, then `team up` from any project directory
+  (git repo or not); detach the broker with `team up --detach` to free your
+  terminal.
 - **Pluggable engines** — built-in profiles for claude, codex, cursor-agent,
   opencode, gemini, aider; add your own without touching code.
 - **Strict DI / testable** — every side effect lives behind a port; the whole
-  system has a single composition root. ~149 tests, all headless.
+  system has a single composition root. 234 tests, all headless.
 - **Crash-safe** — state is rebuilt by replaying the message log.
 
 ## Requirements
@@ -50,6 +63,7 @@ npm install
 
 # 3. Bring the team up (starts the broker + spawns the agents)
 ./bin/team up                    # uses team.yaml; override with TEAM_CONFIG=...
+./bin/team up --detach           # ...or run the broker in the background (frees your terminal)
 
 # 4. Coordinate
 ./bin/team send --to reviewer --type review_request --task t1 "abc123 ready for review"
@@ -62,6 +76,14 @@ npm install
 
 `team up` stays in the foreground holding the broker socket open. Run `send` /
 `inbox` / `ps` from other panes or terminals; stop with `Ctrl-C` or `team down`.
+With `--detach`, the broker forks into the background and the command returns
+immediately — stop it later with `team down`.
+
+**Run from any directory.** The CLI resolves its own dependencies, so you can put
+`bin/team` on your `PATH`, `cd` into *any* project (git repo or not), and run
+`team init` / `team up` there — the broker socket, `.team/` artifacts, and agent
+workdirs resolve against that project (or `root:` if set), not the framework
+clone.
 
 Everything also works through the npm script (no wrapper):
 
@@ -95,8 +117,9 @@ Useful environment variables for the client verbs:
 
 ```yaml
 name: vibe-do-list          # required
-root: .                     # repo root (default ".")
+root: .                     # base dir for all relative paths (default: config-file dir / cwd)
 runtime: panes              # "panes" (tmux) or "servers" (A2A HTTP). default "panes"
+delivery: broker            # "broker" (default) or "direct" peer-to-peer A2A (servers only)
 
 broker:
   transport: unix           # only "unix" today
@@ -107,10 +130,21 @@ servers:
   host: 127.0.0.1
   basePort: 41000           # agent port = basePort + index, unless agent sets `port`
   auth: true                # broker-issued bearer tokens per agent
+  tokenTtlSec: 3600         # (optional) token expiry; omitted = no expiry (v2 behavior)
+  secret: ${MY_SECRET}      # (optional) signing secret; omitted = random in-process secret
   rateLimit:                # shared fleet rate limiter (FleetScheduler)
     maxConcurrency: 4
     bucketCapacity: 8
     refillPerSec: 2
+  tls:                      # (optional) opt-in TLS for cross-host A2A (paths resolved against root)
+    cert: certs/server.pem
+    key: certs/server.key
+    ca: certs/ca.pem        # optional custom CA
+
+# opt-in read-only observability dashboard (default OFF)
+dashboard:
+  enabled: false
+  port: 41999               # serves agents/feed/tasks over HTTP + live SSE
 
 # optional: override or add engine profiles (overlaid on the built-ins)
 engines:
@@ -128,6 +162,7 @@ agents:                      # at least one; ids must be unique
     # engine: claude         # defaults from `cli` when omitted
     workdir: .
     template: lead           # templates/<name>.md (else templates/<role>.md)
+    window: lead             # (panes) agents sharing a window become split panes; default = agent id
     subscribes: [escalation] # message types this agent should be woken for
 
   - id: fe-writer
@@ -135,6 +170,7 @@ agents:                      # at least one; ids must be unique
     cli: claude
     worktree: { branch: feat/frontend, path: worktrees/frontend }
     template: writer
+    window: build            # shares the "build" window with fe-reviewer (two panes)
     capabilities: [frontend, react, css]
     subscribes: [review_comment, ruling]
 
@@ -143,11 +179,17 @@ agents:                      # at least one; ids must be unique
     cli: codex
     workdir: worktrees/frontend
     template: reviewer
+    window: build
     capabilities: [frontend]
     subscribes: [review_request]
+    # runtime: servers       # (mixed teams) host THIS agent on a specific runtime; default = top-level runtime
+    # host: 10.0.0.5         # (multi-host) reachable host this agent's card advertises
+    # url: https://box:8443  # (multi-host) full base URL, overrides host+port+scheme
     # port: 41010            # (servers mode) explicit A2A port override
 
 windows: [servers, git]      # extra tmux windows to open (panes mode)
+layout:                      # (panes) tmux layout per shared window; default even-horizontal
+  build: even-horizontal     # even-horizontal | even-vertical | tiled | main-vertical
 # messageTypes: [...]        # override the default message vocabulary
 ```
 
@@ -185,14 +227,35 @@ must be `server` to be eligible for the `servers` runtime.
   Best for headless/scaled runs. The `servers` block controls the endpoint host,
   base port, bearer **auth** (on by default), and the shared **rate-limit** pool.
 
-Note: routing is **broker-mediated** in both runtimes — there is no direct
-agent-to-agent A2A yet, and multi-host / mixed runtimes are not implemented
-(planned for v3).
+**Mixed runtimes.** A single team can run some agents on `panes` and others on
+`servers` by setting `runtime:` per agent (it falls back to the top-level
+`runtime`). The broker bridges the two transports, so a pane agent and a server
+agent exchange messages transparently.
+
+**Delivery modes.** Routing is **broker-mediated** by default. In `servers` mode
+you can set `delivery: direct` for **peer-to-peer A2A** delivery: the sender
+resolves the recipient client-side from published Agent Cards and calls its A2A
+endpoint directly, while the broker stays the registry, durable JSONL log, and
+observer (so rebuild-from-log still works). `delivery: direct` requires every
+agent to run on the `servers` runtime.
+
+**Multi-host.** Agent Cards advertise reachable URLs derived from config
+(per-agent `host`/`url`, else `servers.host`/`basePort`); the A2A client targets
+those URLs, a `DiscoveryProvider` seam resolves them (static default), and TLS is
+opt-in via `servers.tls`.
+
+## Dashboard
+
+Set `dashboard.enabled: true` (default OFF) to serve a **read-only** observability
+view from the broker process over HTTP + SSE on `dashboard.port`: the live agent
+roster, the message feed, and task states, rendered by a static vanilla-JS client
+(no framework, no build step). It is strictly read-only — there are no
+send/cancel/control endpoints.
 
 ## Testing
 
 ```bash
-npm test          # node --import tsx --test "tests/**/*.test.ts"  (~149 tests)
+npm test          # node --import tsx --test "tests/**/*.test.ts"  (234 tests)
 npm run typecheck # tsc -p tsconfig.json (strict, noEmit)
 ```
 
@@ -202,15 +265,31 @@ sandbox blocks it (`EPERM`/`EACCES`/`EADDRNOTAVAIL`).
 
 ## Project status & roadmap
 
-Shipped: **v1** (panes runtime), **Phase 2** (interactive `doctor`/`init` CLI +
-engine registry), and **v2** (servers runtime, A2A-over-HTTP server/client, SSE +
-push webhooks, bearer auth, fleet scheduler, Task state machine). Current tag:
-**`v2.0.1`**.
+**v3 is complete.** Shipped to date:
 
-Planned (**not built**): **v3 — distributed A2A + observability**
-(`docs/superpowers/plans/2026-06-06-v3-distributed-observability.md`): direct
-agent-to-agent A2A, mixed/multi-host runtimes, a web dashboard, and an
-auth/hardening pass — all designed to slot behind the existing seams.
+- **v1** — panes runtime (config + A2A model, headless broker, `team` CLI,
+  bootstrap, e2e todo team).
+- **Phase 2** — interactive `doctor`/`init` CLI + engine registry.
+- **v2** — servers runtime, A2A-over-HTTP server/client, SSE + push webhooks,
+  bearer auth, fleet scheduler, Task state machine.
+- **Run-from-anywhere fixes** (`v2.1.0`–`v2.1.2`) — per-agent tmux window/pane
+  layout, `root`-anchored paths, `team up --detach`, launcher that boots from any
+  cwd, and `team up` in non-git directories.
+- **v3 — distributed A2A + observability** (`v3-m1`…`v3-m6`):
+  - `v3-m1` direct agent-to-agent A2A (broker as observer + durable log)
+  - `v3-m2` mixed-runtime teams (broker bridges panes ↔ servers transports)
+  - `v3-m3` multi-host (config Agent Card URLs, discovery seam, opt-in TLS)
+  - `v3-m4` read-only observability dashboard (HTTP + SSE, no framework)
+  - `v3-m5` auth hardening (bearer token expiry + rotation)
+  - `v3-m6` self-bootstrap dogfood (see [`examples/`](./examples/))
+
+Current tags: `v3-m1`…`v3-m6`. Everything slots behind the existing seams — no
+rewrites. See the plan in
+`docs/superpowers/plans/2026-06-06-v3-distributed-observability.md`.
+
+The [`examples/agent-bootstrap-team.yaml`](./examples/agent-bootstrap-team.yaml)
+config is a **self-bootstrap dogfood**: it reproduces this repo's own build team
+(lead + writer + reviewer on the panes runtime).
 
 See [ARCHITECTURE.md](./ARCHITECTURE.md) for the design, seams, data model, and a
 file-by-file reference.
