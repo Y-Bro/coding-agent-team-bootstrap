@@ -48,6 +48,20 @@ test("with auth: a token-bearing client is accepted; a tokenless client is rejec
   await assert.rejects(() => tokenless.sendMessage(msg), /bearer token/);
 });
 
+test("sendMessage throws a scheduler-recognized rate-limit error on HTTP 429", async () => {
+  const server = new FakeHttpServer();
+  // a route that responds 429 with a Retry-After hint
+  server.route("POST", "/a2a", async () => ({
+    status: 429, body: "", headers: { "retry-after": "2" },
+  }));
+  const client = new A2AClient(new FakeHttpClient(server, BASE), BASE);
+  await assert.rejects(() => client.sendMessage(msg), (e: unknown) => {
+    assert.equal((e as { status?: number }).status, 429);
+    assert.equal((e as { retryAfterMs?: number }).retryAfterMs, 2000);
+    return true;
+  });
+});
+
 test("sendMessage surfaces a JSON-RPC error as a thrown Error", async () => {
   const client = wired(async () => { throw new Error("nope"); });
   await assert.rejects(() => client.sendMessage(msg), /nope/);

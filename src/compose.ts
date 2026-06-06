@@ -9,10 +9,13 @@ import { SocketTransport, type Transport } from "./broker/transport.ts";
 import { A2ATransport, type A2AEndpoints, type WebhookSender } from "./broker/a2a-transport.ts";
 import { A2AClient } from "./a2a/http/index.ts";
 import { BrokerAuthProvider, bearerHeader } from "./a2a/http/auth.ts";
+import { throwIfRateLimited } from "./a2a/http/ratelimit.ts";
 import { NodeHttpClient } from "./ports/http.ts";
 import { selectRuntime } from "./runtime/select.ts";
 import { ServersRuntime, type AgentLink } from "./runtime/servers/servers.ts";
 import { NodeProcessSpawner } from "./ports/process.ts";
+import { FleetScheduler } from "./runtime/servers/scheduler.ts";
+import { RealSleeper } from "./ports/sleeper.ts";
 import { Bootstrapper } from "./bootstrap/bootstrapper.ts";
 import { SystemClock } from "./ports/clock.ts";
 import { UuidGenerator } from "./ports/ids.ts";
@@ -31,6 +34,12 @@ import { TeamConfigSchema } from "./config/schema.ts";
 
 /** Base port for per-agent A2A endpoints in servers mode (v2-m3 assigns real ports). */
 const A2A_BASE_PORT = 41000;
+
+/**
+ * Default fleet rate-limit knobs for servers mode (v2-m7). The configurable
+ * `servers:` block lands in v2-m8; until then these bound the shared pool.
+ */
+const FLEET_DEFAULTS = { maxConcurrency: 4, bucketCapacity: 8, refillPerSec: 2 } as const;
 
 type TokenFor = (agentId: string) => string | undefined;
 
@@ -52,10 +61,11 @@ function a2aWebhook(cfg: TeamConfig, tokenFor?: TokenFor): WebhookSender {
     push: async (recipient, message) => {
       const port = A2A_BASE_PORT + (indexById.get(recipient.id) ?? 0);
       const token = tokenFor?.(recipient.id);
-      await http.request(`http://127.0.0.1:${port}/webhook`, {
+      const res = await http.request(`http://127.0.0.1:${port}/webhook`, {
         method: "POST", body: JSON.stringify(message),
         headers: token !== undefined ? bearerHeader(token) : undefined,
       });
+      throwIfRateLimited(res); // a 429 from the agent webhook drives scheduler backoff
     },
   };
 }
@@ -106,7 +116,10 @@ export function buildContainer(cfg: TeamConfig, templates: Record<string, string
     const auth = new BrokerAuthProvider(ids);
     const tokens = new Map(cfg.agents.map((a) => [a.id, auth.issueToken(a.id)] as const));
     const tokenFor: TokenFor = (id) => tokens.get(id);
-    transport = new A2ATransport(a2aEndpoints(cfg, tokenFor), a2aWebhook(cfg, tokenFor));
+    // One scheduler shared across the fleet bounds concurrent model-triggering
+    // deliveries against the upstream rate-limit pool (Q4).
+    const scheduler = new FleetScheduler({ clock, sleeper: new RealSleeper(), config: FLEET_DEFAULTS });
+    transport = new A2ATransport(a2aEndpoints(cfg, tokenFor), a2aWebhook(cfg, tokenFor), scheduler);
     broker = makeBroker(transport);
     const link = a2aLink(cfg, broker, clock, ids, tokenFor);
     runtime = selectRuntime(cfg, new NodeTmux(), engines,
