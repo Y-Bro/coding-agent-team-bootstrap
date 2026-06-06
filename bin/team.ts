@@ -11,7 +11,10 @@ const socket = process.env.TEAM_SOCKET ?? ".team/broker.sock";
 if (process.argv[2] === "up" || process.argv[2] === "down") {
   const { loadConfig } = await import("../src/config/index.ts");
   const { buildContainer } = await import("../src/compose.ts");
+  const { teamUp, teamDown } = await import("../src/client/lifecycle.ts");
+  const { NodeFileSystem } = await import("../src/ports/fs.ts");
   const { readFileSync, existsSync } = await import("node:fs");
+  const { dirname, join } = await import("node:path");
 
   const configPath = process.env.TEAM_CONFIG ?? "team.yaml";
   const cfg = loadConfig(configPath);
@@ -24,18 +27,26 @@ if (process.argv[2] === "up" || process.argv[2] === "down") {
     if (templates[name] === undefined && existsSync(path)) templates[name] = readFileSync(path, "utf8");
   }
 
-  const { daemon, bootstrapper } = buildContainer(cfg, templates);
   const socketPath = cfg.broker.socket;
+  const pidfile = join(dirname(socketPath), "broker.pid");
+  const fs = new NodeFileSystem();
+  const proc = {
+    pid: process.pid,
+    kill: (pid: number, signal: string) => { process.kill(pid, signal); },
+    onShutdown: (handler: () => void) => { process.on("SIGINT", handler); process.on("SIGTERM", handler); },
+  };
+
   if (process.argv[2] === "up") {
-    await daemon.start(socketPath);
-    await bootstrapper.up(socketPath);
-    console.log(`team up: ${cfg.name} — ${cfg.agents.length} agents on ${socketPath}`);
+    const { daemon, bootstrapper } = buildContainer(cfg, templates);
+    await teamUp(daemon, bootstrapper, socketPath, { fs, proc, pidfile });
+    console.log(`team up: ${cfg.name} — ${cfg.agents.length} agents on ${socketPath} (Ctrl-C or \`team down\` to stop)`);
+    // No process.exit: the socket server holds the event loop open so the broker
+    // stays reachable for later `team send`/`team inbox`.
   } else {
-    await bootstrapper.down();
-    await daemon.stop();
-    console.log(`team down: ${cfg.name}`);
+    const ok = await teamDown({ fs, proc, pidfile });
+    console.log(ok ? `team down: ${cfg.name}` : "team down: no running broker (no pidfile)");
+    process.exit(ok ? 0 : 1);
   }
-  process.exit(0);
 }
 
 const client = new BrokerClient(new NodeSocketClient(), socket);
