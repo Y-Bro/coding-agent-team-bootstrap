@@ -14,7 +14,7 @@ function isSandboxNetError(e: unknown): boolean {
 
 const stubBroker: BrokerDispatch = {
   register() {}, agents() { return []; },
-  async send() { return {} as never; }, inbox() { return []; },
+  async send() { return {} as never; }, async observe() {}, inbox() { return []; },
 };
 
 class ThrowingServer implements SocketServer {

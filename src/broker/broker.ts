@@ -30,6 +30,8 @@ export interface BrokerDispatch {
   register(card: AgentCard): void;
   agents(): AgentCard[];
   send(input: SendInput): Promise<Message>;
+  /** Record a peer-to-peer-delivered message (observer role, not in delivery path). */
+  observe(message: Message): Promise<void>;
   inbox(agentId: string): Message[];
 }
 
