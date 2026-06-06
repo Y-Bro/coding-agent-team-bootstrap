@@ -5,8 +5,7 @@ import { AgentRegistry } from "./broker/registry.ts";
 import { Router } from "./broker/router.ts";
 import { FeedRenderer } from "./broker/feed.ts";
 import { BrokerDaemon } from "./broker/daemon.ts";
-import { PanesRuntime } from "./runtime/panes.ts";
-import { ServersRuntime } from "./runtime/servers.ts";
+import { selectRuntime } from "./runtime/select.ts";
 import { Bootstrapper } from "./bootstrap/bootstrapper.ts";
 import { SystemClock } from "./ports/clock.ts";
 import { UuidGenerator } from "./ports/ids.ts";
@@ -19,8 +18,7 @@ import type { Runtime } from "./runtime/runtime.ts";
 export function buildContainer(cfg: TeamConfig, templates: Record<string, string>) {
   const fs = new NodeFileSystem();
   const registry = new AgentRegistry();
-  const runtime: Runtime =
-    cfg.runtime === "servers" ? new ServersRuntime() : new PanesRuntime(new NodeTmux(), cfg.name);
+  const runtime: Runtime = selectRuntime(cfg, new NodeTmux());
 
   const broker = new Broker({
     store: new JsonlStore(fs, ".team/messages.jsonl"),
@@ -34,5 +32,5 @@ export function buildContainer(cfg: TeamConfig, templates: Record<string, string
 
   const daemon = new BrokerDaemon(broker, new NodeSocketServer());
   const bootstrapper = new Bootstrapper(cfg, { runtime, git: new NodeGit(), fs, templates });
-  return { broker, daemon, bootstrapper };
+  return { broker, daemon, bootstrapper, runtime };
 }
