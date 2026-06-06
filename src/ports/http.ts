@@ -7,10 +7,12 @@ export interface HttpRequest {
   body: string;
 }
 
-/** An HTTP response (status + raw body). */
+/** An HTTP response (status + raw body + optional response headers). */
 export interface HttpResponse {
   status: number;
   body: string;
+  /** Response headers; when absent the server defaults content-type to application/json. */
+  headers?: Record<string, string>;
 }
 
 export type HttpHandler = (req: HttpRequest) => Promise<HttpResponse> | HttpResponse;
@@ -50,7 +52,8 @@ export class NodeHttpServer implements HttpServer {
             if (!handler) { res.statusCode = 404; res.end(""); return; }
             const out = await handler({ method: req.method ?? "GET", path, body: Buffer.concat(chunks).toString() });
             res.statusCode = out.status;
-            res.setHeader("content-type", "application/json");
+            const headers = out.headers ?? { "content-type": "application/json" };
+            for (const [k, v] of Object.entries(headers)) res.setHeader(k, v);
             res.end(out.body);
           })();
         });
@@ -71,6 +74,8 @@ export class NodeHttpClient implements HttpClient {
       body: init.body,
       headers: init.body !== undefined ? { "content-type": "application/json" } : undefined,
     });
-    return { status: res.status, body: await res.text() };
+    const headers: Record<string, string> = {};
+    res.headers.forEach((v, k) => { headers[k] = v; });
+    return { status: res.status, body: await res.text(), headers };
   }
 }

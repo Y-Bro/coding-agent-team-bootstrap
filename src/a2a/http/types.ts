@@ -10,10 +10,13 @@ export const A2A_PATHS = {
   agentCard: "/.well-known/agent-card.json",
   /** POST — JSON-RPC 2.0 endpoint. */
   rpc: "/a2a",
+  /** POST — JSON-RPC over Server-Sent Events for streamed responses. */
+  rpcStream: "/a2a/stream",
 } as const;
 
-/** The A2A JSON-RPC method this milestone implements. */
+/** The A2A JSON-RPC methods. */
 export const A2A_METHOD_MESSAGE_SEND = "message/send";
+export const A2A_METHOD_MESSAGE_STREAM = "message/stream";
 
 export interface JsonRpcRequest<P = unknown> {
   jsonrpc: "2.0";
