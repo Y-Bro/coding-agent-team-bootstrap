@@ -6,6 +6,31 @@ import { buildProgram } from "../src/client/cli.ts";
 const agentId = process.env.TEAM_AGENT_ID ?? "operator";
 const socket = process.env.TEAM_SOCKET ?? ".team/broker.sock";
 
+// Setup verbs (`team doctor` / `team init`) run their own composition roots and
+// exit; they don't touch the broker socket.
+if (process.argv[2] === "doctor") {
+  const { runDoctorCommand } = await import("../src/compose.ts");
+  const { report, text } = await runDoctorCommand();
+  console.log(text);
+  process.exit(report.ok ? 0 : 1);
+}
+
+if (process.argv[2] === "init") {
+  const { runInitCommand } = await import("../src/compose.ts");
+  const rest = process.argv.slice(3);
+  const yes = rest.includes("--yes");
+  const outIdx = rest.indexOf("--out");
+  const out = outIdx >= 0 && rest[outIdx + 1] ? rest[outIdx + 1]! : "team.yaml";
+  const confirmUp = (p: { confirm(q: string, fallback?: boolean): Promise<boolean> }) =>
+    p.confirm("Bring the team up now?", false);
+  const { wantsUp } = await runInitCommand({ yes, out }, confirmUp);
+  console.log(`Wrote ${out}`);
+  if (wantsUp) {
+    console.log(`Run \`TEAM_CONFIG=${out} team up\` to start the team.`);
+  }
+  process.exit(0);
+}
+
 // Lifecycle verbs (`team up` / `team down`) run the composition root: start the
 // broker daemon and bootstrap (or tear down) the team described by team.yaml.
 if (process.argv[2] === "up" || process.argv[2] === "down") {

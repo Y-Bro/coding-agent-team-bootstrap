@@ -35,7 +35,7 @@ test("wizard with the lead+writer+reviewer preset emits a schema-valid config", 
   assert.equal(parsed.name, "demo");
   assert.equal(parsed.agents.length, 3);
   assert.deepEqual(parsed.agents.map((a) => a.role), ["lead", "writer", "reviewer"]);
-  assert.equal(parsed.agents[2].engine, "codex");
+  assert.equal(parsed.agents[2]!.engine, "codex");
 });
 
 test("writeConfigYaml round-trips through yaml.parse", async () => {
