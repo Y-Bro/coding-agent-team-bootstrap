@@ -4,6 +4,7 @@ import type { AgentDirectory } from "./registry.ts";
 import type { MessageRouter } from "./router.ts";
 import type { FeedWriter } from "./feed.ts";
 import type { Transport } from "./transport.ts";
+import type { MessagePublisher } from "./bus.ts";
 import type { Clock } from "../ports/clock.ts";
 import type { IdGenerator } from "../ports/ids.ts";
 
@@ -23,6 +24,8 @@ export interface BrokerDeps {
   transport: Transport;
   clock: Clock;
   ids: IdGenerator;
+  /** Optional observer fan-out (read-only dashboard); notified of every recorded message. */
+  publisher?: MessagePublisher;
 }
 
 /** Narrow dispatch surface the daemon drives over the wire protocol. */
@@ -104,6 +107,7 @@ export class Broker implements BrokerDispatch, MessageObserver {
     this.deps.store.append(m);
     this.deps.feed.append(m);
     for (const id of recipients) this.deliver(id, m);
+    this.deps.publisher?.publish(m); // notify the read-only dashboard, if attached
   }
 
   private deliver(id: string, m: Message): void {
