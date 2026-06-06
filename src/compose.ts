@@ -6,7 +6,7 @@ import { Router } from "./broker/router.ts";
 import { FeedRenderer } from "./broker/feed.ts";
 import { BrokerDaemon } from "./broker/daemon.ts";
 import { SocketTransport, type Transport } from "./broker/transport.ts";
-import { A2ATransport, type A2AEndpoints } from "./broker/a2a-transport.ts";
+import { A2ATransport, type A2AEndpoints, type WebhookSender } from "./broker/a2a-transport.ts";
 import { A2AClient } from "./a2a/http/index.ts";
 import { NodeHttpClient } from "./ports/http.ts";
 import { selectRuntime } from "./runtime/select.ts";
@@ -38,6 +38,18 @@ function a2aEndpoints(cfg: TeamConfig): A2AEndpoints {
   return {
     clientFor: (recipient) =>
       new A2AClient(http, `http://127.0.0.1:${A2A_BASE_PORT + (indexById.get(recipient.id) ?? 0)}`),
+  };
+}
+
+/** Push-webhook sender: POST the message to each recipient's localhost webhook. */
+function a2aWebhook(cfg: TeamConfig): WebhookSender {
+  const http = new NodeHttpClient();
+  const indexById = new Map(cfg.agents.map((a, i) => [a.id, i] as const));
+  return {
+    push: async (recipient, message) => {
+      const port = A2A_BASE_PORT + (indexById.get(recipient.id) ?? 0);
+      await http.request(`http://127.0.0.1:${port}/webhook`, { method: "POST", body: JSON.stringify(message) });
+    },
   };
 }
 
@@ -83,7 +95,7 @@ export function buildContainer(cfg: TeamConfig, templates: Record<string, string
     // servers: A2A transport needs no runtime, so build broker first, then the
     // ServersRuntime whose link registers with that broker. selectRuntime
     // validates kind:"server" eligibility before the factory runs.
-    transport = new A2ATransport(a2aEndpoints(cfg));
+    transport = new A2ATransport(a2aEndpoints(cfg), a2aWebhook(cfg));
     broker = makeBroker(transport);
     const link = a2aLink(cfg, broker, clock, ids);
     runtime = selectRuntime(cfg, new NodeTmux(), engines,
