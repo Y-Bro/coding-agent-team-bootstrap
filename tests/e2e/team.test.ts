@@ -47,12 +47,18 @@ test("bootstraps the vibe-do-list team from team.yaml: worktrees, cards, role fi
   const fs = new MemoryFs();
   const git = new SpyGit();
   const runtime = new SpyRuntime();
-  const boot = new Bootstrapper(cfg, { runtime, git, fs, engines: resolveEngines(cfg), templates: templates() });
+  const registered: string[] = [];
+  const boot = new Bootstrapper(cfg, {
+    runtime, git, fs, engines: resolveEngines(cfg), templates: templates(),
+    register: (card) => registered.push(card.id),
+  });
 
   await boot.up(".team/broker.sock");
 
   // one worktree add per declaring agent (fe-writer, be-writer)
   assert.equal(git.calls.filter((c) => c[0] === "worktree" && c[1] === "add").length, 2);
+  // every agent registered with the broker roster
+  assert.deepEqual(registered, cfg.agents.map((a) => a.id));
   // a card per agent
   for (const a of cfg.agents) assert.ok(fs.exists(`.team/cards/${a.id}.json`), `card for ${a.id}`);
   assert.equal(JSON.parse(fs.read(".team/cards/be-reviewer.json")).cli, "codex");

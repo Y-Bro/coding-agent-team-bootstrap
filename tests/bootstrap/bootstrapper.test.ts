@@ -26,8 +26,10 @@ function fixture() {
   const fs = new MemoryFs();
   const git = new SpyGit();
   const runtime = new SpyRuntime();
+  const registered: string[] = [];
+  const register = (card: AgentCard) => { registered.push(card.id); };
   const templates = { writer: "# {{id}} writer", reviewer: "# {{id}} reviewer", lead: "# {{id}} lead" };
-  return { boot: new Bootstrapper(cfg, { runtime, git, fs, engines: resolveEngines({}), templates }), cfg, fs, git, runtime };
+  return { boot: new Bootstrapper(cfg, { runtime, git, fs, engines: resolveEngines({}), templates, register }), cfg, fs, git, runtime, registered };
 }
 
 test("up creates worktrees, writes a card + role file per agent, and spawns each", async () => {
@@ -52,6 +54,12 @@ test("up creates worktrees, writes a card + role file per agent, and spawns each
 
   // every agent spawned
   assert.deepEqual(runtime.spawned, ["lead", "fe-writer", "fe-reviewer"]);
+});
+
+test("up registers every agent's card with the broker (so team ps/send work in panes)", async () => {
+  const { boot, registered } = fixture();
+  await boot.up(".team/broker.sock");
+  assert.deepEqual(registered, ["lead", "fe-writer", "fe-reviewer"]);
 });
 
 test("down tears the runtime down", async () => {
