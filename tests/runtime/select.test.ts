@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { selectRuntime } from "../../src/runtime/select.ts";
+import { selectRuntime, effectiveRuntime } from "../../src/runtime/select.ts";
 import { PanesRuntime } from "../../src/runtime/panes.ts";
+import { CompositeRuntime } from "../../src/runtime/composite.ts";
 import { ServersRuntime, type AgentLink } from "../../src/runtime/servers/servers.ts";
 import { loadConfig } from "../../src/config/index.ts";
 import type { TmuxCommands } from "../../src/ports/tmux.ts";
@@ -43,4 +44,33 @@ test("servers mode rejects a repl-only engine with a clear error", () => {
     () => selectRuntime(cfg, new SpyTmux(), engines, makeServers(engines)),
     /requires kind:"server"/,
   );
+});
+
+test("effectiveRuntime: per-agent override wins, else team default", () => {
+  assert.equal(effectiveRuntime({ runtime: "servers" }, { runtime: "panes" }), "servers");
+  assert.equal(effectiveRuntime({ runtime: undefined }, { runtime: "panes" }), "panes");
+});
+
+test("builds a CompositeRuntime for a MIXED team (some panes, some servers)", () => {
+  // team default panes; one agent overridden to servers (with a server engine)
+  const engines = resolveEngines({ engines: { srv: { command: "srv", roleFile: "AGENTS.md", kind: "server" } } });
+  const base = loadConfig("tests/config/fixtures/todo.yaml"); // runtime: panes
+  const cfg: TeamConfig = {
+    ...base,
+    agents: base.agents.map((a, i) => (i === 0 ? { ...a, runtime: "servers" as const, engine: "srv" } : a)),
+  };
+  const rt = selectRuntime(cfg, new SpyTmux(), engines, makeServers(engines));
+  assert.ok(rt instanceof CompositeRuntime);
+});
+
+test("mixed team validates server-eligibility ONLY for agents hosted on servers", () => {
+  // the servers-bound agent has a repl engine → must throw; pane agents with
+  // repl engines are fine.
+  const engines = resolveEngines({ engines: { rep: { command: "rep", roleFile: "AGENTS.md", kind: "repl" } } });
+  const base = loadConfig("tests/config/fixtures/todo.yaml");
+  const cfg: TeamConfig = {
+    ...base,
+    agents: base.agents.map((a, i) => (i === 0 ? { ...a, runtime: "servers" as const, engine: "rep" } : a)),
+  };
+  assert.throws(() => selectRuntime(cfg, new SpyTmux(), engines, makeServers(engines)), /requires kind:"server"/);
 });
