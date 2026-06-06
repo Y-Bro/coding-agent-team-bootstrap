@@ -133,7 +133,10 @@ export function buildContainer(cfg: TeamConfig, templates: Record<string, string
   }
 
   const daemon = new BrokerDaemon(broker, new NodeSocketServer());
-  const bootstrapper = new Bootstrapper(cfg, { runtime, git: new NodeGit(), fs, engines, templates });
+  const bootstrapper = new Bootstrapper(cfg, {
+    runtime, git: new NodeGit(), fs, engines, templates,
+    register: (card) => broker.register(card),
+  });
   return { broker, daemon, bootstrapper, runtime, transport };
 }
 
