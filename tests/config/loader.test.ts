@@ -137,6 +137,21 @@ test("dashboard is opt-in: disabled by default, configurable port", () => {
   assert.equal(on.dashboard.port, 8080);
 });
 
+test("servers auth hardening knobs are optional (tokenTtlSec/secret), default off", () => {
+  const off = TeamConfigSchema.parse({ name: "t", agents: [{ id: "a", role: "writer" }] });
+  assert.equal(off.servers.tokenTtlSec, undefined);
+  assert.equal(off.servers.secret, undefined);
+  const on = TeamConfigSchema.parse({
+    name: "t", servers: { tokenTtlSec: 900, secret: "s3cret" },
+    agents: [{ id: "a", role: "writer" }],
+  });
+  assert.equal(on.servers.tokenTtlSec, 900);
+  assert.equal(on.servers.secret, "s3cret");
+  assert.throws(() => TeamConfigSchema.parse({
+    name: "t", servers: { tokenTtlSec: -1 }, agents: [{ id: "a", role: "writer" }],
+  }));
+});
+
 test("delivery defaults to broker-mediated and accepts direct", () => {
   const def = TeamConfigSchema.parse({ name: "t", agents: [{ id: "a", role: "writer" }] });
   assert.equal(def.delivery, "broker");

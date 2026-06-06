@@ -81,6 +81,11 @@ const Servers = z
     host: z.string().default("127.0.0.1"),
     basePort: z.number().int().positive().default(41000),
     auth: z.boolean().default(true),
+    // v3-m5 auth hardening (opt-in): bearer token lifetime in seconds (omitted →
+    // no expiry, v2 back-compat) and an explicit signing secret (omitted → the
+    // composition root generates a random in-process secret; never hardcoded).
+    tokenTtlSec: z.number().positive().optional(),
+    secret: z.string().min(1).optional(),
     rateLimit: RateLimit,
     tls: Tls.optional(),
   })
