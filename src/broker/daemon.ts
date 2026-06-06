@@ -33,6 +33,9 @@ export class BrokerDaemon {
           return { ok: true, result: this.broker.agents() };
         case "message/send":
           return { ok: true, result: await this.broker.send(req.params) };
+        case "message/observe":
+          await this.broker.observe(req.params.message);
+          return { ok: true, result: null };
         case "inbox/read":
           return { ok: true, result: this.broker.inbox(req.params.agentId) };
         default:

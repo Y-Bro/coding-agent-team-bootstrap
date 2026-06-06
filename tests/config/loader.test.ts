@@ -84,6 +84,21 @@ test("layout rejects unknown tmux layout names", () => {
   }));
 });
 
+test("agent.runtime is optional (team-level fallback) and accepts panes|servers", () => {
+  const cfg = TeamConfigSchema.parse({
+    name: "t", runtime: "panes",
+    agents: [
+      { id: "a", role: "writer" },
+      { id: "b", role: "reviewer", runtime: "servers" },
+    ],
+  });
+  assert.equal(cfg.agents[0]!.runtime, undefined); // falls back to team-level
+  assert.equal(cfg.agents[1]!.runtime, "servers");
+  assert.throws(() => TeamConfigSchema.parse({
+    name: "t", agents: [{ id: "a", role: "writer", runtime: "http" }],
+  }));
+});
+
 test("delivery defaults to broker-mediated and accepts direct", () => {
   const def = TeamConfigSchema.parse({ name: "t", agents: [{ id: "a", role: "writer" }] });
   assert.equal(def.delivery, "broker");

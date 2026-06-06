@@ -28,6 +28,9 @@ const Agent = z
     subscribes: z.array(z.string()).default([]),
     // servers mode: optional explicit A2A port (else derived from servers.basePort + index).
     port: z.number().int().positive().optional(),
+    // v3 mixed teams: host THIS agent on a specific runtime; falls back to the
+    // team-level cfg.runtime when omitted (full back-compat).
+    runtime: z.enum(["panes", "servers"]).optional(),
   })
   .transform((a) => ({
     ...a,

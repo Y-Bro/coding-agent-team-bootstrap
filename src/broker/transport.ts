@@ -1,5 +1,9 @@
 import type { AgentCard, Message } from "../a2a/index.ts";
-import type { Runtime } from "../runtime/runtime.ts";
+
+/** The narrow slice of a runtime the socket transport needs: nudge an agent. */
+export interface Waker {
+  wake(agentId: string, summary: string): Promise<void>;
+}
 
 /**
  * How the broker gets a routed message to a recipient agent (and runs its
@@ -24,10 +28,10 @@ export interface Transport {
  * listen/close are no-ops here.
  */
 export class SocketTransport implements Transport {
-  constructor(private runtime: Runtime) {}
+  constructor(private waker: Waker) {}
 
   async deliver(recipient: AgentCard, message: Message): Promise<void> {
-    await this.runtime.wake(recipient.id, `${message.type} from ${message.from}`);
+    await this.waker.wake(recipient.id, `${message.type} from ${message.from}`);
   }
 
   async listen(): Promise<void> {}
