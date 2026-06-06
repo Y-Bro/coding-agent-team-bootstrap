@@ -16,7 +16,30 @@ class SpyGit implements GitCommands {
   }
 }
 
+/** Git double that fails if touched — proves no git command is run. */
+class ThrowingGit implements GitCommands {
+  run(): string { throw new Error("git must not be called when no worktrees are declared"); }
+}
+
 const adds = (git: SpyGit) => git.calls.filter((c) => c[0] === "worktree" && c[1] === "add");
+
+test("does NOT touch git when no agent declares a worktree (run-from-anywhere in non-git dirs)", () => {
+  const cfg = {
+    agents: [
+      { id: "a", role: "writer", cli: "claude", engine: "claude", workdir: ".", capabilities: [], skills: [], subscribes: [] },
+      { id: "b", role: "reviewer", cli: "claude", engine: "claude", workdir: ".", capabilities: [], skills: [], subscribes: [] },
+    ],
+  } as unknown as TeamConfig;
+  assert.doesNotThrow(() => createWorktrees(cfg, new ThrowingGit(), "/not/a/repo"));
+});
+
+test("fails with a clear message when a worktree is declared but the base is not a git repo", () => {
+  const cfg = loadConfig("tests/config/fixtures/todo.yaml"); // fe-writer declares a worktree
+  const git: GitCommands = {
+    run() { throw new Error("fatal: not a git repository (or any of the parent directories): .git"); },
+  };
+  assert.throws(() => createWorktrees(cfg, git, "/not/a/repo"), /worktrees require a git repo at \/not\/a\/repo/);
+});
 
 test("creates a worktree+branch only for agents that declare one", () => {
   const git = new SpyGit();
