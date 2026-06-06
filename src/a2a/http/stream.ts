@@ -59,7 +59,11 @@ export function registerStreamRoute(http: HttpServer, handler: A2AStreamHandler)
     }
     if (!message) return { status: 400, body: "" };
     const events = await handler.onMessageStream(message);
-    return { status: 200, body: encodeSseStream(events) };
+    return {
+      status: 200,
+      body: encodeSseStream(events),
+      headers: { "content-type": SSE_CONTENT_TYPE, "cache-control": "no-cache" },
+    };
   });
 }
 

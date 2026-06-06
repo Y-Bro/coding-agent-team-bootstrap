@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   encodeSseFrame, encodeSseStream, parseSseFrames,
-  registerStreamRoute, streamMessage, type StreamEvent,
+  registerStreamRoute, streamMessage, SSE_CONTENT_TYPE, type StreamEvent,
 } from "../../../src/a2a/http/stream.ts";
 import { A2A_PATHS } from "../../../src/a2a/http/types.ts";
 import { FakeHttpServer, FakeHttpClient } from "./fakes.ts";
@@ -51,4 +51,15 @@ test("the stream route is registered at the SSE path", () => {
   const server = new FakeHttpServer();
   registerStreamRoute(server, { onMessageStream: () => [] });
   assert.ok(server.routes.has(`POST ${A2A_PATHS.rpcStream}`));
+});
+
+test("the stream route serves content-type text/event-stream", async () => {
+  const server = new FakeHttpServer();
+  registerStreamRoute(server, { onMessageStream: () => [{ data: 1 }] });
+  const res = await server.handle({
+    method: "POST", path: A2A_PATHS.rpcStream,
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "message/stream", params: { message: msg } }),
+  });
+  assert.equal(res.headers?.["content-type"], SSE_CONTENT_TYPE);
+  assert.equal(res.headers?.["cache-control"], "no-cache");
 });
