@@ -8,6 +8,7 @@ import { BrokerDaemon } from "./broker/daemon.ts";
 import { SocketTransport, type Transport } from "./broker/transport.ts";
 import { A2ATransport, type A2AEndpoints, type WebhookSender } from "./broker/a2a-transport.ts";
 import { A2AClient } from "./a2a/http/index.ts";
+import { DirectMessenger, type Messenger } from "./a2a/direct.ts";
 import { BrokerAuthProvider, bearerHeader } from "./a2a/http/auth.ts";
 import { throwIfRateLimited } from "./a2a/http/ratelimit.ts";
 import { NodeHttpClient } from "./ports/http.ts";
@@ -110,6 +111,7 @@ export function buildContainer(cfg: TeamConfig, templates: Record<string, string
   let runtime: Runtime;
   let transport: Transport;
   let broker: Broker;
+  let messenger: Messenger | undefined;
 
   if (cfg.runtime === "servers") {
     // servers: A2A transport needs no runtime, so build broker first, then the
@@ -123,13 +125,27 @@ export function buildContainer(cfg: TeamConfig, templates: Record<string, string
     // One scheduler shared across the fleet bounds concurrent model-triggering
     // deliveries against the upstream rate-limit pool (Q4); knobs from config.
     const scheduler = new FleetScheduler({ clock, sleeper: new RealSleeper(), config: cfg.servers.rateLimit });
-    transport = new A2ATransport(a2aEndpoints(cfg, tokenFor), a2aWebhook(cfg, tokenFor), scheduler);
+    const endpoints = a2aEndpoints(cfg, tokenFor);
+    transport = new A2ATransport(endpoints, a2aWebhook(cfg, tokenFor), scheduler);
     broker = makeBroker(transport);
     const link = a2aLink(cfg, broker, clock, ids, tokenFor);
     runtime = selectRuntime(cfg, new NodeTmux(), engines,
       () => new ServersRuntime({ spawner: new NodeProcessSpawner(), engines, link }));
+    // v3 COEXIST (Q1): in direct mode the sender delivers peer-to-peer and the
+    // broker only observes. Resolution reuses the broker's registry + Router; the
+    // observer is the in-process broker (cross-process observe-over-the-wire is a
+    // follow-up — see .coord/ESCALATIONS.md). Broker-mediated delivery still works.
+    if (cfg.delivery === "direct") {
+      messenger = new DirectMessenger({
+        directory: registry, router: new Router(registry), endpoints,
+        observer: broker, clock, ids,
+      });
+    }
   } else {
     // panes: SocketTransport wraps the runtime, so build the runtime first.
+    if (cfg.delivery === "direct") {
+      throw new Error("delivery: direct requires runtime: servers (no A2A endpoints in panes mode)");
+    }
     runtime = selectRuntime(cfg, new NodeTmux(), engines,
       () => { throw new Error("servers runtime factory called in panes mode"); });
     transport = new SocketTransport(runtime);
@@ -141,7 +157,7 @@ export function buildContainer(cfg: TeamConfig, templates: Record<string, string
     runtime, git: new NodeGit(), fs, engines, templates, teamDir,
     register: (card) => broker.register(card),
   });
-  return { broker, daemon, bootstrapper, runtime, transport };
+  return { broker, daemon, bootstrapper, runtime, transport, messenger };
 }
 
 /** Compose the `team doctor` collaborators: probe core tools + every known engine command. */
