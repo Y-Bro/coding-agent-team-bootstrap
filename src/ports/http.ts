@@ -51,12 +51,12 @@ export class NodeHttpServer implements HttpServer {
             const path = (req.url ?? "/").split("?")[0] ?? "/";
             const handler = this.routes.get(`${(req.method ?? "GET").toUpperCase()} ${path}`);
             if (!handler) { res.statusCode = 404; res.end(""); return; }
-            const headers: Record<string, string> = {};
-            for (const [k, v] of Object.entries(req.headers)) headers[k] = Array.isArray(v) ? v.join(", ") : (v ?? "");
-            const out = await handler({ method: req.method ?? "GET", path, body: Buffer.concat(chunks).toString(), headers });
+            const reqHeaders: Record<string, string> = {};
+            for (const [k, v] of Object.entries(req.headers)) reqHeaders[k] = Array.isArray(v) ? v.join(", ") : (v ?? "");
+            const out = await handler({ method: req.method ?? "GET", path, body: Buffer.concat(chunks).toString(), headers: reqHeaders });
             res.statusCode = out.status;
-            const headers = out.headers ?? { "content-type": "application/json" };
-            for (const [k, v] of Object.entries(headers)) res.setHeader(k, v);
+            const resHeaders = out.headers ?? { "content-type": "application/json" };
+            for (const [k, v] of Object.entries(resHeaders)) res.setHeader(k, v);
             res.end(out.body);
           })();
         });
