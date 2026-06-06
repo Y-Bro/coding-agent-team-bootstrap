@@ -5,8 +5,8 @@ import { BUILTIN_ENGINES, resolveEngines } from "../../src/engines/index.ts";
 
 test("ships the six built-in engines with role-file conventions", () => {
   const byName = Object.fromEntries(BUILTIN_ENGINES.map((e) => [e.name, e]));
-  assert.equal(byName.claude.roleFile, "CLAUDE.md");
-  assert.equal(byName.codex.roleFile, "AGENTS.md");
+  assert.equal(byName.claude!.roleFile, "CLAUDE.md");
+  assert.equal(byName.codex!.roleFile, "AGENTS.md");
   for (const n of ["cursor-agent", "opencode", "gemini", "aider"]) {
     assert.ok(byName[n], `missing built-in ${n}`);
   }
