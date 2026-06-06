@@ -33,7 +33,16 @@ export interface BrokerDispatch {
   inbox(agentId: string): Message[];
 }
 
-export class Broker implements BrokerDispatch {
+/**
+ * The broker's observer role (v3 COEXIST, Q1): record a message that was already
+ * delivered peer-to-peer so the durable log + feed + inbox state stay complete,
+ * WITHOUT the broker being in the delivery path. Satisfied by {@link Broker}.
+ */
+export interface MessageObserver {
+  observe(message: Message): Promise<void>;
+}
+
+export class Broker implements BrokerDispatch, MessageObserver {
   private inboxes = new Map<string, Message[]>();
 
   constructor(private deps: BrokerDeps) {}
@@ -52,14 +61,21 @@ export class Broker implements BrokerDispatch {
       parts: input.parts,
       ts: this.deps.clock.isoNow(),
     };
-    this.deps.store.append(m);
-    this.deps.feed.append(m);
+    this.record(m, recipients);
     for (const id of recipients) {
-      this.deliver(id, m);
       const card = this.deps.registry.get(id);
       if (card) await this.deps.transport.deliver(card, m);
     }
     return m;
+  }
+
+  /**
+   * Observe a message already delivered peer-to-peer (v3 direct mode): persist
+   * it to the durable log + feed and track inbox state for parity — but do NOT
+   * deliver it over the transport (the broker is the observer, not in the path).
+   */
+  async observe(m: Message): Promise<void> {
+    this.record(m, this.safeResolve(m.to, m.type));
   }
 
   /** Drain and return this agent's pending messages. */
@@ -79,6 +95,13 @@ export class Broker implements BrokerDispatch {
 
   private safeResolve(to: string, type: string): string[] {
     try { return this.deps.router.resolve(to, type); } catch { return []; }
+  }
+
+  /** Persist + feed a message and push it into each recipient's inbox (no transport). */
+  private record(m: Message, recipients: string[]): void {
+    this.deps.store.append(m);
+    this.deps.feed.append(m);
+    for (const id of recipients) this.deliver(id, m);
   }
 
   private deliver(id: string, m: Message): void {
