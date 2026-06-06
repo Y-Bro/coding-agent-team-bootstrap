@@ -8,6 +8,7 @@ import { BrokerDaemon } from "./broker/daemon.ts";
 import { SocketTransport, type Transport } from "./broker/transport.ts";
 import { A2ATransport, type A2AEndpoints, type WebhookSender } from "./broker/a2a-transport.ts";
 import { A2AClient } from "./a2a/http/index.ts";
+import { BrokerAuthProvider, bearerHeader } from "./a2a/http/auth.ts";
 import { NodeHttpClient } from "./ports/http.ts";
 import { selectRuntime } from "./runtime/select.ts";
 import { ServersRuntime, type AgentLink } from "./runtime/servers/servers.ts";
@@ -31,24 +32,30 @@ import { TeamConfigSchema } from "./config/schema.ts";
 /** Base port for per-agent A2A endpoints in servers mode (v2-m3 assigns real ports). */
 const A2A_BASE_PORT = 41000;
 
-/** Build the A2A endpoint resolver: one A2AClient per agent at a localhost port. */
-function a2aEndpoints(cfg: TeamConfig): A2AEndpoints {
+type TokenFor = (agentId: string) => string | undefined;
+
+/** Build the A2A endpoint resolver: one A2AClient per agent (with its bearer). */
+function a2aEndpoints(cfg: TeamConfig, tokenFor?: TokenFor): A2AEndpoints {
   const http = new NodeHttpClient();
   const indexById = new Map(cfg.agents.map((a, i) => [a.id, i] as const));
   return {
     clientFor: (recipient) =>
-      new A2AClient(http, `http://127.0.0.1:${A2A_BASE_PORT + (indexById.get(recipient.id) ?? 0)}`),
+      new A2AClient(http, `http://127.0.0.1:${A2A_BASE_PORT + (indexById.get(recipient.id) ?? 0)}`, tokenFor?.(recipient.id)),
   };
 }
 
-/** Push-webhook sender: POST the message to each recipient's localhost webhook. */
-function a2aWebhook(cfg: TeamConfig): WebhookSender {
+/** Push-webhook sender: POST the message to each recipient's localhost webhook (with its bearer). */
+function a2aWebhook(cfg: TeamConfig, tokenFor?: TokenFor): WebhookSender {
   const http = new NodeHttpClient();
   const indexById = new Map(cfg.agents.map((a, i) => [a.id, i] as const));
   return {
     push: async (recipient, message) => {
       const port = A2A_BASE_PORT + (indexById.get(recipient.id) ?? 0);
-      await http.request(`http://127.0.0.1:${port}/webhook`, { method: "POST", body: JSON.stringify(message) });
+      const token = tokenFor?.(recipient.id);
+      await http.request(`http://127.0.0.1:${port}/webhook`, {
+        method: "POST", body: JSON.stringify(message),
+        headers: token !== undefined ? bearerHeader(token) : undefined,
+      });
     },
   };
 }
@@ -58,8 +65,8 @@ function a2aWebhook(cfg: TeamConfig): WebhookSender {
  * (broker-mediated, per Q2) and notify it of waiting mail by pushing a status
  * message to its A2A endpoint.
  */
-function a2aLink(cfg: TeamConfig, broker: Broker, clock: SystemClock, ids: UuidGenerator): AgentLink {
-  const endpoints = a2aEndpoints(cfg);
+function a2aLink(cfg: TeamConfig, broker: Broker, clock: SystemClock, ids: UuidGenerator, tokenFor?: TokenFor): AgentLink {
+  const endpoints = a2aEndpoints(cfg, tokenFor);
   return {
     register: async (card) => { broker.register(card); },
     notify: async (card, summary) => {
@@ -95,9 +102,13 @@ export function buildContainer(cfg: TeamConfig, templates: Record<string, string
     // servers: A2A transport needs no runtime, so build broker first, then the
     // ServersRuntime whose link registers with that broker. selectRuntime
     // validates kind:"server" eligibility before the factory runs.
-    transport = new A2ATransport(a2aEndpoints(cfg), a2aWebhook(cfg));
+    // Broker mediates issuance: one bearer token per agent (Q5, localhost scope).
+    const auth = new BrokerAuthProvider(ids);
+    const tokens = new Map(cfg.agents.map((a) => [a.id, auth.issueToken(a.id)] as const));
+    const tokenFor: TokenFor = (id) => tokens.get(id);
+    transport = new A2ATransport(a2aEndpoints(cfg, tokenFor), a2aWebhook(cfg, tokenFor));
     broker = makeBroker(transport);
-    const link = a2aLink(cfg, broker, clock, ids);
+    const link = a2aLink(cfg, broker, clock, ids, tokenFor);
     runtime = selectRuntime(cfg, new NodeTmux(), engines,
       () => new ServersRuntime({ spawner: new NodeProcessSpawner(), engines, link }));
   } else {
