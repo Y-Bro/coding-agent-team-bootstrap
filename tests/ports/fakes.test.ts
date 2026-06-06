@@ -8,6 +8,15 @@ test("MemoryFs append accumulates", () => {
   assert.equal(fs.read("a"), "x\ny\n");
 });
 
+test("MemoryFs remove deletes a file", () => {
+  const fs = new MemoryFs();
+  fs.write("p", "1234");
+  assert.equal(fs.exists("p"), true);
+  fs.remove("p");
+  assert.equal(fs.exists("p"), false);
+  fs.remove("p"); // idempotent: removing a missing path is a no-op
+});
+
 test("SeqIds increments", () => {
   const ids = new SeqIds();
   assert.equal(ids.next(), "m1");

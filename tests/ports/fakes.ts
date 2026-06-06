@@ -23,4 +23,5 @@ export class MemoryFs implements FileSystem {
   }
   write(path: string, data: string): void { this.files.set(path, data); }
   exists(path: string): boolean { return this.files.has(path); }
+  remove(path: string): void { this.files.delete(path); }
 }
