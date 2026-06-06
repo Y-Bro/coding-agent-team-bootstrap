@@ -20,6 +20,7 @@ test("ScriptedPrompter returns queued answers in order", async () => {
 test("wizard with the lead+writer+reviewer preset emits a schema-valid config", async () => {
   const prompter = new ScriptedPrompter([
     "demo",        // team name
+    "1",           // runtime: panes
     "2",           // preset: lead+writer+reviewer
     "claude",      // lead engine
     "claude",      // writer engine
@@ -33,9 +34,55 @@ test("wizard with the lead+writer+reviewer preset emits a schema-valid config", 
   });
   const parsed = TeamConfigSchema.parse(cfg);
   assert.equal(parsed.name, "demo");
+  assert.equal(parsed.runtime, "panes");
   assert.equal(parsed.agents.length, 3);
   assert.deepEqual(parsed.agents.map((a) => a.role), ["lead", "writer", "reviewer"]);
   assert.equal(parsed.agents[2]!.engine, "codex");
+});
+
+test("custom shape: arbitrary free-text roles + ids produce a valid config (FIX 2)", async () => {
+  const prompter = new ScriptedPrompter([
+    "cloudteam",         // name
+    "1",                 // runtime: panes
+    "4",                 // preset: custom
+    "2",                 // how many agents
+    "arch", "cloud architect", "claude",   // agent 1: id, free-text role, engine
+    "eng", "cloud engineer", "codex",      // agent 2
+  ]);
+  const cfg = await runWizard({
+    prompter, engines: resolveEngines({}), available: new Set(["claude", "codex"]),
+  });
+  const parsed = TeamConfigSchema.parse(cfg);
+  assert.equal(parsed.agents.length, 2);
+  assert.deepEqual(parsed.agents.map((a) => a.id), ["arch", "eng"]);
+  assert.deepEqual(parsed.agents.map((a) => a.role), ["cloud architect", "cloud engineer"]);
+  assert.deepEqual(parsed.agents.map((a) => a.engine), ["claude", "codex"]);
+});
+
+test("runtime is selectable; servers path scaffolds a servers block + warns on non-server engines (FIX 3)", async () => {
+  const warnings: string[] = [];
+  const prompter = new ScriptedPrompter([
+    "srv",       // name
+    "2",         // runtime: servers
+    "1",         // preset: solo
+    "claude",    // engine for the agent
+  ]);
+  const cfg = await runWizard({
+    prompter, engines: resolveEngines({}), available: new Set(["claude"]),
+    warn: (m) => warnings.push(m),
+  });
+  assert.equal(cfg.runtime, "servers");
+  assert.ok(cfg.servers, "servers block scaffolded");
+  assert.equal(cfg.servers!.host, "127.0.0.1");
+  assert.ok(cfg.servers!.basePort > 0);
+  assert.equal(cfg.servers!.auth, true);
+  assert.ok(cfg.servers!.rateLimit.maxConcurrency >= 1);
+
+  const parsed = TeamConfigSchema.parse(cfg);
+  assert.equal(parsed.runtime, "servers");
+  assert.equal(parsed.servers.host, "127.0.0.1");
+
+  assert.ok(warnings.some((w) => /server-capable|kind:"server"/.test(w)), `expected a guidance warning, got ${warnings}`);
 });
 
 test("writeConfigYaml round-trips through yaml.parse", async () => {
