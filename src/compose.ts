@@ -31,6 +31,7 @@ import { runDoctor, type DoctorReport } from "./bootstrap/doctor.ts";
 import { runWizard, writeConfigYaml } from "./cli/wizard.ts";
 import { formatDoctorReport } from "./cli/doctor-cmd.ts";
 import { TeamConfigSchema } from "./config/schema.ts";
+import { dirname, join } from "node:path";
 
 type TokenFor = (agentId: string) => string | undefined;
 
@@ -93,11 +94,14 @@ export function buildContainer(cfg: TeamConfig, templates: Record<string, string
   const engines = resolveEngines(cfg);
   const clock = new SystemClock();
   const ids = new UuidGenerator();
+  // All broker artifacts live alongside the socket, so a run-from-anywhere team
+  // (absolute socket under base/.team) keeps its messages/feed/cards together.
+  const teamDir = dirname(cfg.broker.socket);
   const makeBroker = (transport: Transport): Broker => new Broker({
-    store: new JsonlStore(fs, ".team/messages.jsonl"),
+    store: new JsonlStore(fs, join(teamDir, "messages.jsonl")),
     registry,
     router: new Router(registry),
-    feed: new FeedRenderer(fs, ".team/feed.md"),
+    feed: new FeedRenderer(fs, join(teamDir, "feed.md")),
     transport,
     clock,
     ids,
@@ -134,7 +138,7 @@ export function buildContainer(cfg: TeamConfig, templates: Record<string, string
 
   const daemon = new BrokerDaemon(broker, new NodeSocketServer());
   const bootstrapper = new Bootstrapper(cfg, {
-    runtime, git: new NodeGit(), fs, engines, templates,
+    runtime, git: new NodeGit(), fs, engines, templates, teamDir,
     register: (card) => broker.register(card),
   });
   return { broker, daemon, bootstrapper, runtime, transport };

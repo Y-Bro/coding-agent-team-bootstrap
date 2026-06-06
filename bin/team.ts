@@ -33,7 +33,7 @@ if (process.argv[2] === "init") {
 // Lifecycle verbs (`team up` / `team down`) run the composition root: start the
 // broker daemon and bootstrap (or tear down) the team described by team.yaml.
 if (process.argv[2] === "up" || process.argv[2] === "down") {
-  const { loadConfig } = await import("../src/config/index.ts");
+  const { loadConfig, resolveBase, resolveConfigPaths } = await import("../src/config/index.ts");
   const { buildContainer } = await import("../src/compose.ts");
   const { teamUp, teamDown } = await import("../src/client/lifecycle.ts");
   const { NodeFileSystem } = await import("../src/ports/fs.ts");
@@ -41,7 +41,10 @@ if (process.argv[2] === "up" || process.argv[2] === "down") {
   const { dirname, join } = await import("node:path");
 
   const configPath = process.env.TEAM_CONFIG ?? "team.yaml";
-  const cfg = loadConfig(configPath);
+  // Run-from-anywhere: resolve every config path against the project base so the
+  // team + its .team artifacts live where the config does, not the cwd.
+  const base = resolveBase(loadConfig(configPath), configPath);
+  const cfg = resolveConfigPaths(loadConfig(configPath), base);
 
   // Read each distinct role template the config references (template name, else role).
   const templates: Record<string, string> = {};
