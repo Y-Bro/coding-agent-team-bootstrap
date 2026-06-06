@@ -1,0 +1,44 @@
+# Self-bootstrap (dogfood): the team that builds agent-bootstrap itself.
+# Three agents on the panes runtime — a lead (Claude) orchestrates, a writer
+# (Claude) implements on the feat branch, a reviewer (Codex) reviews. Bring it up
+# from the repo root with:
+#   TEAM_CONFIG=examples/agent-bootstrap-team.yaml team up
+name: agent-bootstrap
+root: .
+runtime: panes
+broker:
+  transport: unix
+  socket: .team/broker.sock
+
+agents:
+  # The lead orchestrates the build and owns merges (its own window).
+  - id: lead
+    role: lead
+    cli: claude
+    workdir: .
+    template: lead
+    window: lead
+    subscribes: [escalation]
+
+  # Writer and reviewer share one window (split panes) to showcase v2.1.0 layout.
+  - id: writer
+    role: writer
+    cli: claude
+    worktree: { branch: feat/bootstrap-dogfood, path: worktrees/writer }
+    template: writer
+    window: build
+    capabilities: [typescript, node]
+    subscribes: [review_comment, ruling]
+
+  - id: reviewer
+    role: reviewer
+    cli: codex
+    workdir: .
+    template: reviewer
+    window: build
+    capabilities: [review]
+    subscribes: [review_request]
+
+# Lay the shared build window out side-by-side.
+layout:
+  build: even-horizontal
