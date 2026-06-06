@@ -2,6 +2,10 @@
 # lead + two writer/reviewer pairs (frontend and backend), all driven by
 # this one file. Bring it up with `team up`, tear it down with `team down`.
 name: vibe-do-list
+# `root` anchors every relative path below (workdirs, worktrees, the broker
+# socket and .team artifacts). It resolves against THIS config file's directory,
+# so you can `cd` into any project, drop a team.yaml there, and `team up` from
+# anywhere — the team + its .team/ live beside the config, not your shell's cwd.
 root: .
 runtime: panes
 broker:
@@ -16,11 +20,15 @@ agents:
     template: lead
     subscribes: [escalation]
 
+  # Agents sharing a `window` value become panes in ONE tmux window. Here each
+  # writer/reviewer pair sits side by side; omit `window` to get one window per
+  # agent (the default). The per-window split is set by `layout` below.
   - id: fe-writer
     role: writer
     cli: claude
     worktree: { branch: feat/frontend, path: worktrees/frontend }
     template: writer
+    window: frontend
     capabilities: [frontend, react, css]
     subscribes: [review_comment, ruling]
 
@@ -29,6 +37,7 @@ agents:
     cli: codex
     workdir: worktrees/frontend
     template: reviewer
+    window: frontend
     capabilities: [frontend]
     subscribes: [review_request]
 
@@ -37,6 +46,7 @@ agents:
     cli: claude
     worktree: { branch: feat/backend, path: worktrees/backend }
     template: writer
+    window: backend
     capabilities: [backend, api, sqlite]
     subscribes: [review_comment, ruling]
 
@@ -45,7 +55,14 @@ agents:
     cli: codex
     workdir: worktrees/backend
     template: reviewer
+    window: backend
     capabilities: [backend]
     subscribes: [review_request]
 
 windows: [servers, git]
+
+# tmux layout per shared window (window name → even-horizontal | even-vertical |
+# tiled | main-vertical). Windows not listed default to even-horizontal.
+layout:
+  frontend: even-horizontal
+  backend: main-vertical
