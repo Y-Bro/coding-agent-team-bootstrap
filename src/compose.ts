@@ -9,6 +9,7 @@ import { SocketTransport, type Transport } from "./broker/transport.ts";
 import { A2ATransport, type A2AEndpoints, type WebhookSender } from "./broker/a2a-transport.ts";
 import { A2AClient } from "./a2a/http/index.ts";
 import { BrokerAuthProvider, bearerHeader } from "./a2a/http/auth.ts";
+import { throwIfRateLimited } from "./a2a/http/ratelimit.ts";
 import { NodeHttpClient } from "./ports/http.ts";
 import { selectRuntime } from "./runtime/select.ts";
 import { ServersRuntime, type AgentLink } from "./runtime/servers/servers.ts";
@@ -60,10 +61,11 @@ function a2aWebhook(cfg: TeamConfig, tokenFor?: TokenFor): WebhookSender {
     push: async (recipient, message) => {
       const port = A2A_BASE_PORT + (indexById.get(recipient.id) ?? 0);
       const token = tokenFor?.(recipient.id);
-      await http.request(`http://127.0.0.1:${port}/webhook`, {
+      const res = await http.request(`http://127.0.0.1:${port}/webhook`, {
         method: "POST", body: JSON.stringify(message),
         headers: token !== undefined ? bearerHeader(token) : undefined,
       });
+      throwIfRateLimited(res); // a 429 from the agent webhook drives scheduler backoff
     },
   };
 }

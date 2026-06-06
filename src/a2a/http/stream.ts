@@ -2,6 +2,7 @@ import type { HttpServer, HttpClient } from "../../ports/http.ts";
 import type { Message } from "../index.ts";
 import { A2A_PATHS, A2A_METHOD_MESSAGE_STREAM, JSON_RPC_ERRORS } from "./types.ts";
 import { authorize, bearerHeader, type AuthProvider } from "./auth.ts";
+import { throwIfRateLimited } from "./ratelimit.ts";
 
 /** Content type for an SSE response. */
 export const SSE_CONTENT_TYPE = "text/event-stream";
@@ -82,5 +83,6 @@ export async function streamMessage(http: HttpClient, baseUrl: string, message: 
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: A2A_METHOD_MESSAGE_STREAM, params: { message } }),
     headers: token !== undefined ? bearerHeader(token) : undefined,
   });
+  throwIfRateLimited(res); // surface HTTP 429 so the FleetScheduler backs off
   return parseSseFrames(res.body);
 }

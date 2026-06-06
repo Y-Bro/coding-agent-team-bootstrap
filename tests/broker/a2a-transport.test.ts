@@ -1,6 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { A2ATransport, type A2ASender, type A2AEndpoints, type WebhookSender } from "../../src/broker/a2a-transport.ts";
+import { FleetScheduler } from "../../src/runtime/servers/scheduler.ts";
+import { A2AClient } from "../../src/a2a/http/client.ts";
+import type { Clock } from "../../src/ports/clock.ts";
+import type { Sleeper } from "../../src/ports/sleeper.ts";
+import type { HttpClient, HttpResponse } from "../../src/ports/http.ts";
 import type { AgentCard, Message } from "../../src/a2a/index.ts";
 
 const card = (id: string): AgentCard => ({
@@ -60,6 +65,38 @@ test("A2ATransport routes delivery through the scheduler when one is injected", 
   await t.deliver(card("fe-reviewer"), msg);
   assert.deepEqual(calls, ["fe-reviewer"], "delivery is gated by the scheduler, keyed by recipient");
   assert.deepEqual(sent, ["m1"], "the wrapped call still delivers");
+});
+
+test("a real HTTP 429 from the A2A client is retried through the FleetScheduler and then succeeds", async () => {
+  class FixedClock implements Clock {
+    now(): Date { return new Date("2026-06-06T00:00:00.000Z"); }
+    isoNow(): string { return this.now().toISOString(); }
+  }
+  const slept: number[] = [];
+  const sleeper: Sleeper = { sleep: async (ms) => { slept.push(ms); } };
+
+  // HTTP layer: first call -> 429 (Retry-After 2s), then -> a JSON-RPC success.
+  let calls = 0;
+  const http: HttpClient = {
+    request: async (): Promise<HttpResponse> => {
+      calls++;
+      if (calls === 1) return { status: 429, body: "", headers: { "retry-after": "2" } };
+      return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: 1, result: { message: msg } }) };
+    },
+  };
+
+  const scheduler = new FleetScheduler({
+    clock: new FixedClock(), sleeper,
+    config: { maxConcurrency: 2, bucketCapacity: 1e9, refillPerSec: 1e9 },
+  });
+  const endpoints: A2AEndpoints = {
+    clientFor: () => new A2AClient(http, "http://127.0.0.1:7000"),
+  };
+  const t = new A2ATransport(endpoints, undefined, scheduler);
+
+  await t.deliver(card("fe-reviewer"), msg);
+  assert.equal(calls, 2, "the 429 was retried");
+  assert.deepEqual(slept, [2000], "backoff honored the Retry-After hint");
 });
 
 test("A2ATransport listen/close are no-ops at this milestone", async () => {
