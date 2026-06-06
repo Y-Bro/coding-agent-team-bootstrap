@@ -10,9 +10,11 @@ import { CompositeTransport } from "./broker/composite-transport.ts";
 import { A2ATransport, type A2AEndpoints, type WebhookSender } from "./broker/a2a-transport.ts";
 import { A2AClient } from "./a2a/http/index.ts";
 import { DirectMessenger, type Messenger } from "./a2a/direct.ts";
+import { staticDiscoveryFromConfig, stampUrl, type DiscoveryProvider } from "./a2a/discovery.ts";
 import { BrokerAuthProvider, bearerHeader } from "./a2a/http/auth.ts";
 import { throwIfRateLimited } from "./a2a/http/ratelimit.ts";
-import { NodeHttpClient } from "./ports/http.ts";
+import { NodeHttpClient, type TlsClientOptions } from "./ports/http.ts";
+import type { AgentCard } from "./a2a/index.ts";
 import { selectRuntime, effectiveRuntime } from "./runtime/select.ts";
 import type { RuntimeKind } from "./runtime/composite.ts";
 import { ServersRuntime, type AgentLink } from "./runtime/servers/servers.ts";
@@ -38,33 +40,28 @@ import { dirname, join } from "node:path";
 
 type TokenFor = (agentId: string) => string | undefined;
 
-/** Resolve each agent's A2A base URL from the servers block (per-agent port override wins). */
-function a2aBaseUrl(cfg: TeamConfig): (agentId: string) => string {
-  const indexById = new Map(cfg.agents.map((a, i) => [a.id, i] as const));
-  return (id) => {
-    const idx = indexById.get(id) ?? 0;
-    const port = cfg.agents[idx]?.port ?? cfg.servers.basePort + idx;
-    return `http://${cfg.servers.host}:${port}`;
-  };
+/** The recipient's reachable A2A base URL: its advertised card url, else discovery (config). */
+function urlOf(discovery: DiscoveryProvider, recipient: AgentCard): string {
+  const url = recipient.url ?? discovery.resolve(recipient.id);
+  if (!url) throw new Error(`no reachable A2A URL for agent ${recipient.id}`);
+  return url;
 }
 
-/** Build the A2A endpoint resolver: one A2AClient per agent (with its bearer). */
-function a2aEndpoints(cfg: TeamConfig, tokenFor?: TokenFor): A2AEndpoints {
-  const http = new NodeHttpClient();
-  const baseUrl = a2aBaseUrl(cfg);
+/** Build the A2A endpoint resolver: one A2AClient per agent (its bearer + the resolved url). */
+function a2aEndpoints(discovery: DiscoveryProvider, tokenFor?: TokenFor, clientTls?: TlsClientOptions): A2AEndpoints {
+  const http = new NodeHttpClient(clientTls);
   return {
-    clientFor: (recipient) => new A2AClient(http, baseUrl(recipient.id), tokenFor?.(recipient.id)),
+    clientFor: (recipient) => new A2AClient(http, urlOf(discovery, recipient), tokenFor?.(recipient.id)),
   };
 }
 
-/** Push-webhook sender: POST the message to each recipient's localhost webhook (with its bearer). */
-function a2aWebhook(cfg: TeamConfig, tokenFor?: TokenFor): WebhookSender {
-  const http = new NodeHttpClient();
-  const baseUrl = a2aBaseUrl(cfg);
+/** Push-webhook sender: POST the message to each recipient's resolved webhook (with its bearer). */
+function a2aWebhook(discovery: DiscoveryProvider, tokenFor?: TokenFor, clientTls?: TlsClientOptions): WebhookSender {
+  const http = new NodeHttpClient(clientTls);
   return {
     push: async (recipient, message) => {
       const token = tokenFor?.(recipient.id);
-      const res = await http.request(`${baseUrl(recipient.id)}/webhook`, {
+      const res = await http.request(`${urlOf(discovery, recipient)}/webhook`, {
         method: "POST", body: JSON.stringify(message),
         headers: token !== undefined ? bearerHeader(token) : undefined,
       });
@@ -75,13 +72,13 @@ function a2aWebhook(cfg: TeamConfig, tokenFor?: TokenFor): WebhookSender {
 
 /**
  * The servers-mode link: register a spawned agent with the in-process broker
- * (broker-mediated, per Q2) and notify it of waiting mail by pushing a status
- * message to its A2A endpoint.
+ * (broker-mediated, per Q2), stamping its reachable url, and notify it of waiting
+ * mail by pushing a status message to its A2A endpoint.
  */
-function a2aLink(cfg: TeamConfig, broker: Broker, clock: SystemClock, ids: UuidGenerator, tokenFor?: TokenFor): AgentLink {
-  const endpoints = a2aEndpoints(cfg, tokenFor);
+function a2aLink(discovery: DiscoveryProvider, broker: Broker, clock: SystemClock, ids: UuidGenerator, tokenFor?: TokenFor, clientTls?: TlsClientOptions): AgentLink {
+  const endpoints = a2aEndpoints(discovery, tokenFor, clientTls);
   return {
-    register: async (card) => { broker.register(card); },
+    register: async (card) => { broker.register(stampUrl(discovery, card)); },
     notify: async (card, summary) => {
       await endpoints.clientFor(card).sendMessage({
         id: ids.next("m"), from: "broker", to: card.id, type: "status",
@@ -132,6 +129,16 @@ export function buildContainer(cfg: TeamConfig, templates: Record<string, string
   let runtime: Runtime;
   const socketTransport = new SocketTransport({ wake: (id, summary) => runtime.wake(id, summary) });
 
+  // v3-m3 multi-host: agents are reachable at config-resolved URLs (Agent Cards
+  // advertise them). DiscoveryProvider is the resolution seam (static default).
+  const discovery = staticDiscoveryFromConfig(cfg);
+  // Opt-in TLS: trust the configured CA (self-signed → the cert itself) on
+  // outbound A2A calls. Server-side TLS material is consumed by agent processes.
+  const tls = cfg.servers.tls;
+  const clientTls: TlsClientOptions | undefined = tls
+    ? { ca: tls.ca ? fs.read(tls.ca) : fs.read(tls.cert) }
+    : undefined;
+
   // Servers-side A2A wiring, built only when some agent runs on servers. Broker
   // mediates token issuance (one bearer per agent, Q5); one shared FleetScheduler
   // bounds the fleet's concurrent model-triggering deliveries (Q4).
@@ -143,8 +150,8 @@ export function buildContainer(cfg: TeamConfig, templates: Record<string, string
     const tokens = new Map(auth ? cfg.agents.map((a) => [a.id, auth.issueToken(a.id)] as const) : []);
     tokenFor = (id) => tokens.get(id);
     const scheduler = new FleetScheduler({ clock, sleeper: new RealSleeper(), config: cfg.servers.rateLimit });
-    endpoints = a2aEndpoints(cfg, tokenFor);
-    a2aTransport = new A2ATransport(endpoints, a2aWebhook(cfg, tokenFor), scheduler);
+    endpoints = a2aEndpoints(discovery, tokenFor, clientTls);
+    a2aTransport = new A2ATransport(endpoints, a2aWebhook(discovery, tokenFor, clientTls), scheduler);
   }
 
   // Single matching transport per kind; a mixed team bridges socket<->A2A by
@@ -160,7 +167,7 @@ export function buildContainer(cfg: TeamConfig, templates: Record<string, string
   const makeServersRuntime = needsServers
     ? () => new ServersRuntime({
         spawner: new NodeProcessSpawner(), engines,
-        link: a2aLink(cfg, broker, clock, ids, tokenFor),
+        link: a2aLink(discovery, broker, clock, ids, tokenFor, clientTls),
       })
     : () => { throw new Error("servers runtime factory called without a servers agent"); };
   // selectRuntime validates server-engine eligibility and builds panes/servers/
@@ -181,7 +188,7 @@ export function buildContainer(cfg: TeamConfig, templates: Record<string, string
   const daemon = new BrokerDaemon(broker, new NodeSocketServer());
   const bootstrapper = new Bootstrapper(cfg, {
     runtime, git: new NodeGit(), fs, engines, templates, teamDir,
-    register: (card) => broker.register(card),
+    register: (card) => broker.register(stampUrl(discovery, card)),
   });
   return { broker, daemon, bootstrapper, runtime, transport, messenger };
 }

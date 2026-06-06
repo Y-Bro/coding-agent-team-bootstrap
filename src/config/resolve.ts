@@ -21,9 +21,13 @@ export function resolveBase(cfg: Pick<TeamConfig, "root">, configPath: string): 
  * artifacts land under the project's `base/.team` regardless of where `team` runs.
  */
 export function resolveConfigPaths(cfg: TeamConfig, base: string): TeamConfig {
+  const tls = cfg.servers.tls;
   return {
     ...cfg,
     broker: { ...cfg.broker, socket: resolve(base, cfg.broker.socket) },
+    servers: tls
+      ? { ...cfg.servers, tls: { cert: resolve(base, tls.cert), key: resolve(base, tls.key), ca: tls.ca ? resolve(base, tls.ca) : undefined } }
+      : cfg.servers,
     agents: cfg.agents.map((a) => ({
       ...a,
       workdir: resolve(base, a.workdir),

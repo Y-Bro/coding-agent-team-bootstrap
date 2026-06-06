@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { StaticDiscovery, NoopDiscovery, agentUrls, staticDiscoveryFromConfig } from "../../src/a2a/discovery.ts";
+import { StaticDiscovery, NoopDiscovery, agentUrls, staticDiscoveryFromConfig, stampUrl } from "../../src/a2a/discovery.ts";
 import { TeamConfigSchema, type TeamConfig } from "../../src/config/schema.ts";
+import type { AgentCard } from "../../src/a2a/index.ts";
 
 function cfg(over: Record<string, unknown>): TeamConfig {
   return TeamConfigSchema.parse({
@@ -34,6 +35,24 @@ test("agentUrls: explicit url wins; else scheme://host:port (per-agent host/port
   assert.equal(urls.get("a"), "http://10.0.0.1:5000");
   assert.equal(urls.get("b"), "http://10.0.0.9:9001");
   assert.equal(urls.get("c"), "https://c.example.com:8443");
+});
+
+test("stampUrl resolves a card's reachable url from config (config -> Agent Card)", () => {
+  const c = cfg({
+    servers: { host: "10.0.0.1", basePort: 5000, auth: false },
+    agents: [
+      { id: "a", role: "writer", engine: "srv" },
+      { id: "b", role: "reviewer", engine: "srv", url: "https://b.remote:8443" },
+    ],
+  });
+  const d = staticDiscoveryFromConfig(c);
+  const bare = (id: string): AgentCard => ({
+    id, role: "writer", cli: "claude", engine: "srv", capabilities: [], skills: [], workdir: ".", subscribes: [],
+  });
+  assert.equal(stampUrl(d, bare("a")).url, "http://10.0.0.1:5000");
+  assert.equal(stampUrl(d, bare("b")).url, "https://b.remote:8443");
+  // an explicit card url is preserved, not overwritten
+  assert.equal(stampUrl(d, { ...bare("a"), url: "https://override:1" }).url, "https://override:1");
 });
 
 test("agentUrls: scheme is https when TLS is configured", () => {

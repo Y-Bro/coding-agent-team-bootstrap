@@ -1,4 +1,5 @@
 import type { TeamConfig } from "../config/index.ts";
+import type { AgentCard } from "./index.ts";
 
 /**
  * Resolve an agent id to its reachable A2A base URL (v3-m3 multi-host). A small
@@ -35,4 +36,9 @@ export function agentUrls(cfg: TeamConfig): Map<string, string> {
 /** Build the default static discovery provider from a team config. */
 export function staticDiscoveryFromConfig(cfg: TeamConfig): StaticDiscovery {
   return new StaticDiscovery(agentUrls(cfg));
+}
+
+/** Stamp a card's reachable url (multi-host advertisement) from discovery if unset. */
+export function stampUrl(discovery: DiscoveryProvider, card: AgentCard): AgentCard {
+  return card.url ? card : { ...card, url: discovery.resolve(card.id) };
 }
