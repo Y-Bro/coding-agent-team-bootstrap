@@ -10,3 +10,12 @@ test("plans one pane per agent plus extra windows", () => {
   assert.deepEqual(plan.extraWindows, ["servers", "git"]);
   assert.equal(plan.session, "todo");
 });
+
+test("resolves pane workdirs against a base dir when given (run-from-anywhere)", () => {
+  const cfg = loadConfig("tests/config/fixtures/todo.yaml");
+  const plan = planTopology(cfg, "/proj");
+  const lead = plan.agentPanes.find((p) => p.agentId === "lead")!;
+  assert.equal(lead.workdir, "/proj");
+  const fe = plan.agentPanes.find((p) => p.agentId === "fe-writer")!;
+  assert.equal(fe.workdir, "/proj/frontend");
+});

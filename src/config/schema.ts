@@ -20,6 +20,9 @@ const Agent = z
     workdir: z.string().default("."),
     worktree: Worktree.optional(),
     template: z.string().optional(),
+    // panes mode: agents sharing a `window` value become panes in ONE tmux
+    // window; omitted defaults (at runtime) to the agent id (one window each).
+    window: z.string().optional(),
     capabilities: z.array(z.string()).default([]),
     skills: z.array(z.string()).default([]),
     subscribes: z.array(z.string()).default([]),
@@ -72,6 +75,9 @@ export const TeamConfigSchema = z.object({
   engines: z.record(EngineProfileSchema).optional(),
   agents: z.array(Agent).min(1),
   windows: z.array(z.string()).default([]),
+  // panes mode: tmux layout to apply to each shared window (keyed by window
+  // name). Windows not listed fall back to `even-horizontal` at runtime.
+  layout: z.record(z.enum(["even-horizontal", "even-vertical", "tiled", "main-vertical"])).default({}),
   messageTypes: z.array(z.string()).default([...DEFAULT_MESSAGE_TYPES]),
 }).superRefine((cfg, ctx) => {
   const seen = new Set<string>();

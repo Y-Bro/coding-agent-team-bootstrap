@@ -63,7 +63,7 @@ test("bootstraps the vibe-do-list team from team.yaml: worktrees, cards, role fi
   for (const a of cfg.agents) assert.ok(fs.exists(`.team/cards/${a.id}.json`), `card for ${a.id}`);
   assert.equal(JSON.parse(fs.read(".team/cards/be-reviewer.json")).cli, "codex");
   // role file rendered from the writer template into the lead's dir
-  assert.match(fs.read("./CLAUDE.md"), /lead \/ orchestrator/);
+  assert.match(fs.read("CLAUDE.md"), /lead \/ orchestrator/);
   // every agent spawned, in config order
   assert.deepEqual(runtime.spawned, cfg.agents.map((a) => a.id));
 });
