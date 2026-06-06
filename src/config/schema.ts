@@ -31,6 +31,10 @@ const Agent = z
     // v3 mixed teams: host THIS agent on a specific runtime; falls back to the
     // team-level cfg.runtime when omitted (full back-compat).
     runtime: z.enum(["panes", "servers"]).optional(),
+    // v3 multi-host: this agent's reachable host (overrides servers.host) and/or a
+    // full base URL the Agent Card advertises (overrides host+port+scheme entirely).
+    host: z.string().optional(),
+    url: z.string().url().optional(),
   })
   .transform((a) => ({
     ...a,
@@ -60,12 +64,25 @@ const RateLimit = z
  * auth toggle, and the shared fleet rate-limit knobs. Defaults are safe for
  * loopback so a `runtime: servers` team needs no extra config.
  */
+/**
+ * Opt-in TLS for cross-host A2A (v3-m3). Paths to PEM cert/key (+ optional CA for
+ * self-signed/private chains), resolved against the team base. When present the
+ * A2A scheme becomes https and servers listen with TLS; absent → plain http
+ * (default, nothing changes).
+ */
+const Tls = z.object({
+  cert: z.string(),
+  key: z.string(),
+  ca: z.string().optional(),
+});
+
 const Servers = z
   .object({
     host: z.string().default("127.0.0.1"),
     basePort: z.number().int().positive().default(41000),
     auth: z.boolean().default(true),
     rateLimit: RateLimit,
+    tls: Tls.optional(),
   })
   .default({});
 

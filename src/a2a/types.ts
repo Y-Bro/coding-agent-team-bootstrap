@@ -9,6 +9,8 @@ export interface AgentCard {
   skills: string[];
   workdir: string;
   subscribes: string[];
+  /** Reachable A2A base URL this agent advertises (multi-host, v3-m3). Resolved from config. */
+  url?: string;
 }
 
 export type Part =
