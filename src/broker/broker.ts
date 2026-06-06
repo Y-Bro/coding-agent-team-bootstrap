@@ -25,7 +25,15 @@ export interface BrokerDeps {
   ids: IdGenerator;
 }
 
-export class Broker {
+/** Narrow dispatch surface the daemon drives over the wire protocol. */
+export interface BrokerDispatch {
+  register(card: AgentCard): void;
+  agents(): AgentCard[];
+  send(input: SendInput): Promise<Message>;
+  inbox(agentId: string): Message[];
+}
+
+export class Broker implements BrokerDispatch {
   private inboxes = new Map<string, Message[]>();
 
   constructor(private deps: BrokerDeps) {}
