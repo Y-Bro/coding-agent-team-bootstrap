@@ -11,7 +11,8 @@ import { A2ATransport, type A2AEndpoints, type WebhookSender } from "./broker/a2
 import { A2AClient } from "./a2a/http/index.ts";
 import { DirectMessenger, type Messenger } from "./a2a/direct.ts";
 import { staticDiscoveryFromConfig, stampUrl, type DiscoveryProvider } from "./a2a/discovery.ts";
-import { BrokerAuthProvider, bearerHeader } from "./a2a/http/auth.ts";
+import { BrokerAuthProvider, InProcessSecret, bearerHeader } from "./a2a/http/auth.ts";
+import { randomBytes } from "node:crypto";
 import { throwIfRateLimited } from "./a2a/http/ratelimit.ts";
 import { NodeHttpClient, NodeHttpServer, type TlsClientOptions } from "./ports/http.ts";
 import { MessageBus } from "./broker/bus.ts";
@@ -153,7 +154,12 @@ export function buildContainer(cfg: TeamConfig, templates: Record<string, string
   let a2aTransport: A2ATransport | undefined;
   let tokenFor: TokenFor = () => undefined;
   if (needsServers) {
-    const auth = cfg.servers.auth ? new BrokerAuthProvider(ids) : undefined;
+    // Bearer auth with opt-in hardening (Q5): expiry from servers.tokenTtlSec and
+    // an HMAC signing secret (configured, else a freshly-generated in-process one
+    // — never hardcoded). No knobs → exact v2 bearer behavior.
+    const secret = new InProcessSecret(cfg.servers.secret ?? randomBytes(32).toString("hex"));
+    const ttlMs = cfg.servers.tokenTtlSec !== undefined ? cfg.servers.tokenTtlSec * 1000 : undefined;
+    const auth = cfg.servers.auth ? new BrokerAuthProvider(ids, { clock, secret, ttlMs }) : undefined;
     const tokens = new Map(auth ? cfg.agents.map((a) => [a.id, auth.issueToken(a.id)] as const) : []);
     tokenFor = (id) => tokens.get(id);
     const scheduler = new FleetScheduler({ clock, sleeper: new RealSleeper(), config: cfg.servers.rateLimit });
