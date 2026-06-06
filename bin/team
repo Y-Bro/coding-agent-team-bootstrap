@@ -4,4 +4,8 @@
 # as a module (a shebang breaks tsx's parser).
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-exec node --import tsx "$DIR/team.ts" "$@"
+# Launch via the framework's LOCAL tsx bin (not `node --import tsx`): node would
+# resolve the bare `tsx` specifier from the user's cwd, breaking when `team` runs
+# from any directory outside this clone. The user's cwd is preserved for relative
+# TEAM_CONFIG; team.ts's ../src imports resolve relative to team.ts.
+exec "$DIR/../node_modules/.bin/tsx" "$DIR/team.ts" "$@"
