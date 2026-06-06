@@ -80,10 +80,16 @@ if (process.argv[2] === "up" || process.argv[2] === "down") {
   }
 }
 
-const client = new BrokerClient(new NodeSocketClient(), socket);
-const program = buildProgram(client, agentId, (s) => console.log(s));
+// Client verbs only. Setup/lifecycle verbs are handled above; `up` deliberately
+// does NOT exit (the socket keeps the event loop alive), so it must NOT fall
+// through to commander here — that would print "unknown command up" and exit(1),
+// killing the just-started broker.
+if (!["doctor", "init", "up", "down"].includes(process.argv[2] ?? "")) {
+  const client = new BrokerClient(new NodeSocketClient(), socket);
+  const program = buildProgram(client, agentId, (s) => console.log(s));
 
-program.parseAsync(process.argv).catch((e) => {
-  console.error(e instanceof Error ? e.message : e);
-  process.exit(1);
-});
+  program.parseAsync(process.argv).catch((e) => {
+    console.error(e instanceof Error ? e.message : e);
+    process.exit(1);
+  });
+}
