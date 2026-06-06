@@ -50,6 +50,44 @@ test("unknown method returns a JSON-RPC methodNotFound error", async () => {
   assert.equal(body.error.code, JSON_RPC_ERRORS.methodNotFound);
 });
 
+async function post(body: string) {
+  const http = new FakeHttpServer();
+  let called = false;
+  new A2AServer(http, card, {
+    onMessageSend: async ({ message }) => { called = true; return { message }; },
+  }).register();
+  const res = await http.handle({ method: "POST", path: A2A_PATHS.rpc, body });
+  return { body: JSON.parse(res.body), called };
+}
+
+test("rejects a wrong jsonrpc version with invalidRequest", async () => {
+  const { body, called } = await post(JSON.stringify({ jsonrpc: "1.0", id: 1, method: "message/send", params: { message: msg } }));
+  assert.equal(body.error.code, JSON_RPC_ERRORS.invalidRequest);
+  assert.equal(called, false);
+});
+
+test("rejects a missing/invalid id with invalidRequest", async () => {
+  const { body } = await post(JSON.stringify({ jsonrpc: "2.0", method: "message/send", params: { message: msg } }));
+  assert.equal(body.error.code, JSON_RPC_ERRORS.invalidRequest);
+});
+
+test("rejects a non-string method with invalidRequest", async () => {
+  const { body } = await post(JSON.stringify({ jsonrpc: "2.0", id: 1, method: 123, params: { message: msg } }));
+  assert.equal(body.error.code, JSON_RPC_ERRORS.invalidRequest);
+});
+
+test("rejects message/send with missing params.message with invalidParams", async () => {
+  const { body, called } = await post(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "message/send", params: {} }));
+  assert.equal(body.error.code, JSON_RPC_ERRORS.invalidParams);
+  assert.equal(called, false);
+});
+
+test("rejects message/send with an invalid Message with invalidParams", async () => {
+  const bad = { id: "x", from: "a", to: "b", type: "note" }; // no parts/ts → not a Message
+  const { body } = await post(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "message/send", params: { message: bad } }));
+  assert.equal(body.error.code, JSON_RPC_ERRORS.invalidParams);
+});
+
 test("a handler that throws surfaces a JSON-RPC internalError", async () => {
   const http = new FakeHttpServer();
   new A2AServer(http, card, {
