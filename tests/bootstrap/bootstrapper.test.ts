@@ -47,7 +47,7 @@ test("up creates worktrees, writes a card + role file per agent, and spawns each
   assert.equal(card.cli, "codex");
 
   // role files rendered from the per-role template; lead has its own dir (".")
-  assert.match(fs.read("./CLAUDE.md"), /# lead lead/);
+  assert.match(fs.read("CLAUDE.md"), /# lead lead/);
   // fe-writer + fe-reviewer intentionally share the 'frontend' worktree, so the
   // role file there is written for whichever agent the bootstrapper handles last.
   assert.ok(fs.exists("frontend/CLAUDE.md"));
@@ -60,6 +60,21 @@ test("up registers every agent's card with the broker (so team ps/send work in p
   const { boot, registered } = fixture();
   await boot.up(".team/broker.sock");
   assert.deepEqual(registered, ["lead", "fe-writer", "fe-reviewer"]);
+});
+
+test("writes cards under an absolute teamDir (run-from-anywhere)", async () => {
+  const cfg = loadConfig("tests/config/fixtures/todo.yaml");
+  const fs = new MemoryFs();
+  const registered: string[] = [];
+  const boot = new Bootstrapper(cfg, {
+    runtime: new SpyRuntime(), git: new SpyGit(), fs,
+    engines: resolveEngines({}), templates: { lead: "# {{id}}", writer: "# {{id}}", reviewer: "# {{id}}" },
+    register: (card: AgentCard) => { registered.push(card.id); },
+    teamDir: "/proj/.team",
+  });
+  await boot.up("/proj/.team/broker.sock");
+  assert.ok(fs.exists("/proj/.team/cards/lead.json"));
+  assert.ok(fs.exists("/proj/.team/cards/fe-writer.json"));
 });
 
 test("down tears the runtime down", async () => {
