@@ -1,0 +1,51 @@
+# Example team: "vibe-do-list" — a small to-do list app built by a
+# lead + two writer/reviewer pairs (frontend and backend), all driven by
+# this one file. Bring it up with `team up`, tear it down with `team down`.
+name: vibe-do-list
+root: .
+runtime: panes
+broker:
+  transport: unix
+  socket: .team/broker.sock
+
+agents:
+  - id: lead
+    role: lead
+    cli: claude
+    workdir: .
+    template: lead
+    subscribes: [escalation]
+
+  - id: fe-writer
+    role: writer
+    cli: claude
+    worktree: { branch: feat/frontend, path: worktrees/frontend }
+    template: writer
+    capabilities: [frontend, react, css]
+    subscribes: [review_comment, ruling]
+
+  - id: fe-reviewer
+    role: reviewer
+    cli: codex
+    workdir: worktrees/frontend
+    template: reviewer
+    capabilities: [frontend]
+    subscribes: [review_request]
+
+  - id: be-writer
+    role: writer
+    cli: claude
+    worktree: { branch: feat/backend, path: worktrees/backend }
+    template: writer
+    capabilities: [backend, api, sqlite]
+    subscribes: [review_comment, ruling]
+
+  - id: be-reviewer
+    role: reviewer
+    cli: codex
+    workdir: worktrees/backend
+    template: reviewer
+    capabilities: [backend]
+    subscribes: [review_request]
+
+windows: [servers, git]
