@@ -16,6 +16,8 @@ export interface BootstrapDeps {
   templates: Record<string, string>; // role name → template text
   /** Register an agent card with the in-process broker so team ps/send see the roster. */
   register: (card: AgentCard) => void;
+  /** Project a card before it is published (e.g. stamp its reachable url). Defaults to identity. */
+  stampCard?: (card: AgentCard) => AgentCard;
   /** Directory for broker artifacts (cards). Absolute under run-from-anywhere; defaults to ".team". */
   teamDir?: string;
 }
@@ -33,9 +35,15 @@ export class Bootstrapper {
     // clobbers the first. Give such agents distinct workdirs (or worktrees) if
     // they need their own role file; grouping them into one tmux `window` does
     // NOT change this. We detect and warn rather than fail (last write wins).
+    // Single source of truth for each agent's published card: stamp once (e.g.
+    // its reachable url) so the broker registration, the on-disk
+    // .team/cards/<id>.json, and the spawn card are all the identical card.
+    const stamp = this.deps.stampCard ?? ((c) => c);
+    const cards = this.cfg.agents.map((a) => stamp(toCard(a)));
+
     const roleFilesSeen = new Set<string>();
-    for (const a of this.cfg.agents) {
-      const card = toCard(a);
+    this.cfg.agents.forEach((a, i) => {
+      const card = cards[i]!;
       this.deps.register(card); // populate the broker roster (panes engines never self-register)
       this.deps.fs.write(join(teamDir, "cards", `${a.id}.json`), JSON.stringify(card, null, 2));
       const tmplName = a.template ?? a.role;
@@ -46,9 +54,9 @@ export class Bootstrapper {
       }
       roleFilesSeen.add(roleFilePath);
       this.deps.fs.write(roleFilePath, renderRoleFile(tmpl, a));
-    }
-    for (const a of this.cfg.agents) {
-      await this.deps.runtime.spawn(toCard(a), { config: this.cfg, socketPath });
+    });
+    for (const card of cards) {
+      await this.deps.runtime.spawn(card, { config: this.cfg, socketPath });
     }
   }
 

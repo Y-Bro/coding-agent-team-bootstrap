@@ -15,8 +15,9 @@ class SpyGit implements GitCommands {
 
 class SpyRuntime implements Runtime {
   spawned: string[] = [];
+  spawnedCards: AgentCard[] = [];
   tornDown = false;
-  async spawn(a: AgentCard, _c: SpawnCtx): Promise<void> { this.spawned.push(a.id); }
+  async spawn(a: AgentCard, _c: SpawnCtx): Promise<void> { this.spawned.push(a.id); this.spawnedCards.push(a); }
   async wake(): Promise<void> {}
   async teardown(): Promise<void> { this.tornDown = true; }
 }
@@ -75,6 +76,32 @@ test("writes cards under an absolute teamDir (run-from-anywhere)", async () => {
   await boot.up("/proj/.team/broker.sock");
   assert.ok(fs.exists("/proj/.team/cards/lead.json"));
   assert.ok(fs.exists("/proj/.team/cards/fe-writer.json"));
+});
+
+test("writes URL-stamped cards: on-disk, registered, and spawned cards are identical (multi-host)", async () => {
+  const cfg = loadConfig("tests/config/fixtures/todo.yaml");
+  const fs = new MemoryFs();
+  const runtime = new SpyRuntime();
+  const registered: AgentCard[] = [];
+  // stampCard mirrors the composition root: derive a reachable url per agent.
+  const url = (id: string) => `https://${id}.remote:8443`;
+  const boot = new Bootstrapper(cfg, {
+    runtime, git: new SpyGit(), fs, engines: resolveEngines({}),
+    templates: { lead: "# {{id}}", writer: "# {{id}}", reviewer: "# {{id}}" },
+    register: (card: AgentCard) => { registered.push(card); },
+    stampCard: (card) => ({ ...card, url: url(card.id) }),
+  });
+  await boot.up(".team/broker.sock");
+
+  // the on-disk card carries the config-derived url (the defect: was undefined)
+  const onDisk = JSON.parse(fs.read(".team/cards/lead.json"));
+  assert.equal(onDisk.url, url("lead"));
+  // registered copy matches the on-disk copy exactly (single source of truth)
+  const reg = registered.find((c) => c.id === "lead")!;
+  assert.equal(reg.url, url("lead"));
+  assert.deepEqual(reg, onDisk);
+  // and the spawned card is the same URL-bearing card
+  assert.equal(runtime.spawnedCards.find((c) => c.id === "lead")!.url, url("lead"));
 });
 
 test("down tears the runtime down", async () => {

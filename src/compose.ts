@@ -188,7 +188,10 @@ export function buildContainer(cfg: TeamConfig, templates: Record<string, string
   const daemon = new BrokerDaemon(broker, new NodeSocketServer());
   const bootstrapper = new Bootstrapper(cfg, {
     runtime, git: new NodeGit(), fs, engines, templates, teamDir,
-    register: (card) => broker.register(stampUrl(discovery, card)),
+    // Stamp the reachable url once; the bootstrapper uses the same stamped card
+    // for the broker registration, the on-disk .team/cards/<id>.json, and spawn.
+    stampCard: (card) => stampUrl(discovery, card),
+    register: (card) => broker.register(card),
   });
   return { broker, daemon, bootstrapper, runtime, transport, messenger };
 }
