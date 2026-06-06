@@ -99,6 +99,35 @@ test("agent.runtime is optional (team-level fallback) and accepts panes|servers"
   }));
 });
 
+test("agent host/url are optional and parsed; url must be a valid URL", () => {
+  const cfg = TeamConfigSchema.parse({
+    name: "t", runtime: "servers",
+    engines: { srv: { command: "x", roleFile: "AGENTS.md", kind: "server" } },
+    agents: [
+      { id: "a", role: "writer", engine: "srv", host: "10.0.0.5" },
+      { id: "b", role: "reviewer", engine: "srv", url: "https://b.example.com:8443" },
+    ],
+  });
+  assert.equal(cfg.agents[0]!.host, "10.0.0.5");
+  assert.equal(cfg.agents[1]!.url, "https://b.example.com:8443");
+  assert.throws(() => TeamConfigSchema.parse({
+    name: "t", agents: [{ id: "a", role: "writer", url: "not a url" }],
+  }));
+});
+
+test("servers.tls is optional and carries cert/key (+ optional ca)", () => {
+  const off = TeamConfigSchema.parse({ name: "t", agents: [{ id: "a", role: "writer" }] });
+  assert.equal(off.servers.tls, undefined); // default OFF
+  const on = TeamConfigSchema.parse({
+    name: "t", servers: { tls: { cert: "cert.pem", key: "key.pem", ca: "ca.pem" } },
+    agents: [{ id: "a", role: "writer" }],
+  });
+  assert.deepEqual(on.servers.tls, { cert: "cert.pem", key: "key.pem", ca: "ca.pem" });
+  assert.throws(() => TeamConfigSchema.parse({
+    name: "t", servers: { tls: { cert: "cert.pem" } }, agents: [{ id: "a", role: "writer" }],
+  }));
+});
+
 test("delivery defaults to broker-mediated and accepts direct", () => {
   const def = TeamConfigSchema.parse({ name: "t", agents: [{ id: "a", role: "writer" }] });
   assert.equal(def.delivery, "broker");
