@@ -32,36 +32,35 @@ import { runWizard, writeConfigYaml } from "./cli/wizard.ts";
 import { formatDoctorReport } from "./cli/doctor-cmd.ts";
 import { TeamConfigSchema } from "./config/schema.ts";
 
-/** Base port for per-agent A2A endpoints in servers mode (v2-m3 assigns real ports). */
-const A2A_BASE_PORT = 41000;
-
-/**
- * Default fleet rate-limit knobs for servers mode (v2-m7). The configurable
- * `servers:` block lands in v2-m8; until then these bound the shared pool.
- */
-const FLEET_DEFAULTS = { maxConcurrency: 4, bucketCapacity: 8, refillPerSec: 2 } as const;
-
 type TokenFor = (agentId: string) => string | undefined;
+
+/** Resolve each agent's A2A base URL from the servers block (per-agent port override wins). */
+function a2aBaseUrl(cfg: TeamConfig): (agentId: string) => string {
+  const indexById = new Map(cfg.agents.map((a, i) => [a.id, i] as const));
+  return (id) => {
+    const idx = indexById.get(id) ?? 0;
+    const port = cfg.agents[idx]?.port ?? cfg.servers.basePort + idx;
+    return `http://${cfg.servers.host}:${port}`;
+  };
+}
 
 /** Build the A2A endpoint resolver: one A2AClient per agent (with its bearer). */
 function a2aEndpoints(cfg: TeamConfig, tokenFor?: TokenFor): A2AEndpoints {
   const http = new NodeHttpClient();
-  const indexById = new Map(cfg.agents.map((a, i) => [a.id, i] as const));
+  const baseUrl = a2aBaseUrl(cfg);
   return {
-    clientFor: (recipient) =>
-      new A2AClient(http, `http://127.0.0.1:${A2A_BASE_PORT + (indexById.get(recipient.id) ?? 0)}`, tokenFor?.(recipient.id)),
+    clientFor: (recipient) => new A2AClient(http, baseUrl(recipient.id), tokenFor?.(recipient.id)),
   };
 }
 
 /** Push-webhook sender: POST the message to each recipient's localhost webhook (with its bearer). */
 function a2aWebhook(cfg: TeamConfig, tokenFor?: TokenFor): WebhookSender {
   const http = new NodeHttpClient();
-  const indexById = new Map(cfg.agents.map((a, i) => [a.id, i] as const));
+  const baseUrl = a2aBaseUrl(cfg);
   return {
     push: async (recipient, message) => {
-      const port = A2A_BASE_PORT + (indexById.get(recipient.id) ?? 0);
       const token = tokenFor?.(recipient.id);
-      const res = await http.request(`http://127.0.0.1:${port}/webhook`, {
+      const res = await http.request(`${baseUrl(recipient.id)}/webhook`, {
         method: "POST", body: JSON.stringify(message),
         headers: token !== undefined ? bearerHeader(token) : undefined,
       });
@@ -113,12 +112,13 @@ export function buildContainer(cfg: TeamConfig, templates: Record<string, string
     // ServersRuntime whose link registers with that broker. selectRuntime
     // validates kind:"server" eligibility before the factory runs.
     // Broker mediates issuance: one bearer token per agent (Q5, localhost scope).
-    const auth = new BrokerAuthProvider(ids);
-    const tokens = new Map(cfg.agents.map((a) => [a.id, auth.issueToken(a.id)] as const));
+    // Auth is on by default but can be disabled via the servers block.
+    const auth = cfg.servers.auth ? new BrokerAuthProvider(ids) : undefined;
+    const tokens = new Map(auth ? cfg.agents.map((a) => [a.id, auth.issueToken(a.id)] as const) : []);
     const tokenFor: TokenFor = (id) => tokens.get(id);
     // One scheduler shared across the fleet bounds concurrent model-triggering
-    // deliveries against the upstream rate-limit pool (Q4).
-    const scheduler = new FleetScheduler({ clock, sleeper: new RealSleeper(), config: FLEET_DEFAULTS });
+    // deliveries against the upstream rate-limit pool (Q4); knobs from config.
+    const scheduler = new FleetScheduler({ clock, sleeper: new RealSleeper(), config: cfg.servers.rateLimit });
     transport = new A2ATransport(a2aEndpoints(cfg, tokenFor), a2aWebhook(cfg, tokenFor), scheduler);
     broker = makeBroker(transport);
     const link = a2aLink(cfg, broker, clock, ids, tokenFor);
