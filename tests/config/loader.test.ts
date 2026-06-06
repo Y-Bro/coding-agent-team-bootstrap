@@ -9,7 +9,7 @@ test("agent.engine defaults to 'claude' when omitted", () => {
     name: "t",
     agents: [{ id: "lead", role: "lead" }],
   });
-  assert.equal(cfg.agents[0].engine, "claude");
+  assert.equal(cfg.agents[0]!.engine, "claude");
 });
 
 test("top-level engines map accepts custom engine profiles", () => {
@@ -18,8 +18,8 @@ test("top-level engines map accepts custom engine profiles", () => {
     engines: { mytool: { command: "mytool", roleFile: "MY.md" } },
     agents: [{ id: "a", role: "writer", engine: "mytool" }],
   });
-  assert.equal(cfg.engines?.mytool.command, "mytool");
-  assert.equal(cfg.agents[0].engine, "mytool");
+  assert.equal(cfg.engines?.mytool!.command, "mytool");
+  assert.equal(cfg.agents[0]!.engine, "mytool");
 });
 
 test("loadConfig parses and defaults a valid team.yaml", () => {
