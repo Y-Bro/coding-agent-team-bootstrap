@@ -33,8 +33,8 @@ test("up creates worktrees, writes a card + role file per agent, and spawns each
   const { boot, fs, git, runtime } = fixture();
   await boot.up(".team/broker.sock");
 
-  // worktree only for the agent that declares one
-  assert.equal(git.calls.filter((c) => c[0] === "worktree").length, 1);
+  // worktree added only for the agent that declares one
+  assert.equal(git.calls.filter((c) => c[0] === "worktree" && c[1] === "add").length, 1);
 
   // a card per agent
   assert.ok(fs.exists(".team/cards/lead.json"));
