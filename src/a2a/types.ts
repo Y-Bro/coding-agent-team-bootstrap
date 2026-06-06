@@ -4,6 +4,7 @@ export interface AgentCard {
   id: string;
   role: string;
   cli: Cli;
+  engine: string;
   capabilities: string[];
   skills: string[];
   workdir: string;

@@ -5,7 +5,7 @@ import { Router } from "../../src/broker/router.ts";
 import type { AgentCard } from "../../src/a2a/index.ts";
 
 const card = (over: Partial<AgentCard>): AgentCard => ({
-  id: "x", role: "writer", cli: "claude", capabilities: [], skills: [],
+  id: "x", role: "writer", cli: "claude", engine: "claude", capabilities: [], skills: [],
   workdir: ".", subscribes: [], ...over,
 });
 

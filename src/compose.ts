@@ -14,11 +14,13 @@ import { NodeTmux } from "./ports/tmux.ts";
 import { NodeGit } from "./ports/git.ts";
 import { NodeSocketServer } from "./ports/transport.ts";
 import type { Runtime } from "./runtime/runtime.ts";
+import { resolveEngines } from "./engines/index.ts";
 
 export function buildContainer(cfg: TeamConfig, templates: Record<string, string>) {
   const fs = new NodeFileSystem();
   const registry = new AgentRegistry();
-  const runtime: Runtime = selectRuntime(cfg, new NodeTmux());
+  const engines = resolveEngines(cfg);
+  const runtime: Runtime = selectRuntime(cfg, new NodeTmux(), engines);
 
   const broker = new Broker({
     store: new JsonlStore(fs, ".team/messages.jsonl"),
@@ -31,6 +33,6 @@ export function buildContainer(cfg: TeamConfig, templates: Record<string, string
   });
 
   const daemon = new BrokerDaemon(broker, new NodeSocketServer());
-  const bootstrapper = new Bootstrapper(cfg, { runtime, git: new NodeGit(), fs, templates });
+  const bootstrapper = new Bootstrapper(cfg, { runtime, git: new NodeGit(), fs, engines, templates });
   return { broker, daemon, bootstrapper, runtime };
 }

@@ -32,8 +32,8 @@ test("after teamUp the broker stays alive and reachable (no process.exit)", asyn
     runtime: { async spawn() {}, async wake() {}, async teardown() {} },
     clock: new SystemClock(), ids: new UuidGenerator(),
   });
-  broker.register({ id: "a", role: "writer", cli: "claude", capabilities: [], skills: [], workdir: ".", subscribes: [] });
-  broker.register({ id: "b", role: "reviewer", cli: "codex", capabilities: [], skills: [], workdir: ".", subscribes: ["review_request"] });
+  broker.register({ id: "a", role: "writer", cli: "claude", engine: "claude", capabilities: [], skills: [], workdir: ".", subscribes: [] });
+  broker.register({ id: "b", role: "reviewer", cli: "codex", engine: "codex", capabilities: [], skills: [], workdir: ".", subscribes: ["review_request"] });
 
   const daemon = new BrokerDaemon(broker, new NodeSocketServer());
   const proc: ProcessControl = { pid: 9999, kill() {}, onShutdown() {} };

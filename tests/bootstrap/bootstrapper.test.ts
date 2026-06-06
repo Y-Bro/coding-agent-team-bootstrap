@@ -6,6 +6,7 @@ import { MemoryFs } from "../ports/fakes.ts";
 import type { GitCommands } from "../../src/ports/git.ts";
 import type { Runtime, SpawnCtx } from "../../src/runtime/runtime.ts";
 import type { AgentCard } from "../../src/a2a/index.ts";
+import { resolveEngines } from "../../src/engines/index.ts";
 
 class SpyGit implements GitCommands {
   calls: string[][] = [];
@@ -26,7 +27,7 @@ function fixture() {
   const git = new SpyGit();
   const runtime = new SpyRuntime();
   const templates = { writer: "# {{id}} writer", reviewer: "# {{id}} reviewer", lead: "# {{id}} lead" };
-  return { boot: new Bootstrapper(cfg, { runtime, git, fs, templates }), cfg, fs, git, runtime };
+  return { boot: new Bootstrapper(cfg, { runtime, git, fs, engines: resolveEngines({}), templates }), cfg, fs, git, runtime };
 }
 
 test("up creates worktrees, writes a card + role file per agent, and spawns each", async () => {

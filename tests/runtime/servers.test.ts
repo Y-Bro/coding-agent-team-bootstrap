@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { ServersRuntime } from "../../src/runtime/servers.ts";
 import type { AgentCard } from "../../src/a2a/index.ts";
 
-const card: AgentCard = { id: "x", role: "writer", cli: "claude",
+const card: AgentCard = { id: "x", role: "writer", cli: "claude", engine: "claude",
   capabilities: [], skills: [], workdir: ".", subscribes: [] };
 
 test("spawn throws a clear, actionable not-implemented error", async () => {
