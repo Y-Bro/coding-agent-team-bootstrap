@@ -13,7 +13,9 @@ import { DirectMessenger, type Messenger } from "./a2a/direct.ts";
 import { staticDiscoveryFromConfig, stampUrl, type DiscoveryProvider } from "./a2a/discovery.ts";
 import { BrokerAuthProvider, bearerHeader } from "./a2a/http/auth.ts";
 import { throwIfRateLimited } from "./a2a/http/ratelimit.ts";
-import { NodeHttpClient, type TlsClientOptions } from "./ports/http.ts";
+import { NodeHttpClient, NodeHttpServer, type TlsClientOptions } from "./ports/http.ts";
+import { MessageBus } from "./broker/bus.ts";
+import { DashboardServer } from "./dashboard/server.ts";
 import type { AgentCard } from "./a2a/index.ts";
 import { selectRuntime, effectiveRuntime } from "./runtime/select.ts";
 import type { RuntimeKind } from "./runtime/composite.ts";
@@ -97,14 +99,19 @@ export function buildContainer(cfg: TeamConfig, templates: Record<string, string
   // All broker artifacts live alongside the socket, so a run-from-anywhere team
   // (absolute socket under base/.team) keeps its messages/feed/cards together.
   const teamDir = dirname(cfg.broker.socket);
+  const store = new JsonlStore(fs, join(teamDir, "messages.jsonl"));
+  // Read-only dashboard (opt-in): a MessageBus fans recorded messages out to the
+  // dashboard's live SSE feed. Absent → broker.publisher stays undefined (no cost).
+  const bus = cfg.dashboard.enabled ? new MessageBus() : undefined;
   const makeBroker = (transport: Transport): Broker => new Broker({
-    store: new JsonlStore(fs, join(teamDir, "messages.jsonl")),
+    store,
     registry,
     router: new Router(registry),
     feed: new FeedRenderer(fs, join(teamDir, "feed.md")),
     transport,
     clock,
     ids,
+    publisher: bus,
   });
 
   // Each agent runs on its own runtime (panes/servers), else the team default.
@@ -193,7 +200,16 @@ export function buildContainer(cfg: TeamConfig, templates: Record<string, string
     stampCard: (card) => stampUrl(discovery, card),
     register: (card) => broker.register(card),
   });
-  return { broker, daemon, bootstrapper, runtime, transport, messenger };
+
+  // Opt-in read-only dashboard, served from the broker process on its own port.
+  let dashboard: { server: DashboardServer; port: number } | undefined;
+  if (bus) {
+    const server = new DashboardServer({ server: new NodeHttpServer(), store, registry, subscriber: bus });
+    server.register();
+    dashboard = { server, port: cfg.dashboard.port };
+  }
+
+  return { broker, daemon, bootstrapper, runtime, transport, messenger, dashboard };
 }
 
 /** Compose the `team doctor` collaborators: probe core tools + every known engine command. */
