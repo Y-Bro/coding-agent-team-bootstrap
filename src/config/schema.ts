@@ -14,7 +14,7 @@ const EngineProfileSchema = z.object({
 const Agent = z.object({
   id: z.string().min(1),
   role: z.string().min(1),
-  cli: z.enum(["claude", "codex"]).optional(),
+  cli: z.enum(["claude", "codex"]).default("claude"),
   engine: z.string().default("claude"),
   workdir: z.string().default("."),
   worktree: Worktree.optional(),
