@@ -86,6 +86,17 @@ const Servers = z
   })
   .default({});
 
+/**
+ * Opt-in read-only observability dashboard (v3-m4). Default OFF, so existing
+ * teams are unchanged; when enabled the broker process serves it on `port`.
+ */
+const Dashboard = z
+  .object({
+    enabled: z.boolean().default(false),
+    port: z.number().int().positive().default(41999),
+  })
+  .default({});
+
 export const TeamConfigSchema = z.object({
   name: z.string().min(1),
   root: z.string().default("."),
@@ -95,6 +106,7 @@ export const TeamConfigSchema = z.object({
   delivery: z.enum(["broker", "direct"]).default("broker"),
   broker: Broker,
   servers: Servers,
+  dashboard: Dashboard,
   engines: z.record(EngineProfileSchema).optional(),
   agents: z.array(Agent).min(1),
   windows: z.array(z.string()).default([]),

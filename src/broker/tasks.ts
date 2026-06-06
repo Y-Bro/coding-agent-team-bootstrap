@@ -31,6 +31,29 @@ function taskEventOf(m: Message): TaskEvent | undefined {
 }
 
 /**
+ * Derive current task state from a message log: each `task_status` event sets a
+ * task's latest state (title/owner carried forward). Pure read-only projection,
+ * shared by {@link TaskMachine.rebuild} and the read-only dashboard.
+ */
+export function projectTasks(messages: Iterable<Message>): Task[] {
+  const tasks = new Map<string, Task>();
+  for (const m of messages) {
+    const ev = taskEventOf(m);
+    if (!ev) continue;
+    const existing = tasks.get(ev.taskId);
+    tasks.set(ev.taskId, {
+      id: ev.taskId,
+      title: ev.title ?? existing?.title ?? "",
+      owner: ev.owner ?? existing?.owner ?? "",
+      state: ev.state,
+      history: [],
+      artifacts: [],
+    });
+  }
+  return [...tasks.values()];
+}
+
+/**
  * The A2A Task lifecycle, persisted over the existing v1 {@link MessageStore}:
  * every create/transition is appended as a `task_status` message, so replaying
  * the log reconstructs task state (rebuild-from-log preserved). Illegal
@@ -69,19 +92,7 @@ export class TaskMachine {
   /** Reconstruct all task state by replaying the persisted log (no re-record). */
   rebuild(): void {
     this.tasks.clear();
-    for (const m of this.store.replay()) {
-      const ev = taskEventOf(m);
-      if (!ev) continue;
-      const existing = this.tasks.get(ev.taskId);
-      this.tasks.set(ev.taskId, {
-        id: ev.taskId,
-        title: ev.title ?? existing?.title ?? "",
-        owner: ev.owner ?? existing?.owner ?? "",
-        state: ev.state,
-        history: [],
-        artifacts: [],
-      });
-    }
+    for (const t of projectTasks(this.store.replay())) this.tasks.set(t.id, t);
   }
 
   private record(ev: TaskEvent): void {

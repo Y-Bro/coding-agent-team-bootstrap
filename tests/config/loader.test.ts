@@ -128,6 +128,15 @@ test("servers.tls is optional and carries cert/key (+ optional ca)", () => {
   }));
 });
 
+test("dashboard is opt-in: disabled by default, configurable port", () => {
+  const off = TeamConfigSchema.parse({ name: "t", agents: [{ id: "a", role: "writer" }] });
+  assert.equal(off.dashboard.enabled, false);
+  assert.equal(off.dashboard.port, 41999);
+  const on = TeamConfigSchema.parse({ name: "t", dashboard: { enabled: true, port: 8080 }, agents: [{ id: "a", role: "writer" }] });
+  assert.equal(on.dashboard.enabled, true);
+  assert.equal(on.dashboard.port, 8080);
+});
+
 test("delivery defaults to broker-mediated and accepts direct", () => {
   const def = TeamConfigSchema.parse({ name: "t", agents: [{ id: "a", role: "writer" }] });
   assert.equal(def.delivery, "broker");

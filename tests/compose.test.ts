@@ -77,6 +77,14 @@ test("buildContainer bridges a mixed team: CompositeRuntime + CompositeTransport
   assert.ok(c.transport instanceof CompositeTransport);
 });
 
+test("buildContainer builds the dashboard only when dashboard.enabled (opt-in)", () => {
+  const base = loadConfig("tests/config/fixtures/todo.yaml");
+  assert.equal(buildContainer(base, templates).dashboard, undefined);
+  const on = buildContainer({ ...base, dashboard: { enabled: true, port: 8123 } }, templates);
+  assert.ok(on.dashboard);
+  assert.equal(on.dashboard!.port, 8123);
+});
+
 test("buildContainer rejects delivery:direct on a MIXED team (>=1 pane agent has no A2A server)", () => {
   // preserves the v3-m1 invariant: direct delivery requires every agent on servers
   const cfg = { ...mixedConfig(), delivery: "direct" as const };

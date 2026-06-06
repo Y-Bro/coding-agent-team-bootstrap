@@ -39,8 +39,21 @@ export interface HttpClient {
   request(url: string, init: { method: string; body?: string; headers?: Record<string, string> }): Promise<HttpResponse>;
 }
 
-export class NodeHttpServer implements HttpServer {
+/** A live Server-Sent-Events connection: push frames over time, until closed. */
+export interface SseConnection {
+  /** Send one event (data JSON-encoded; optional event name). */
+  send(data: unknown, event?: string): void;
+}
+
+/** Server capable of holding open a live SSE route (the dashboard live feed). */
+export interface SseServer {
+  /** Register a GET SSE route; `onConnect` runs per client and returns a cleanup fn. */
+  sse(path: string, onConnect: (conn: SseConnection) => (() => void) | void): void;
+}
+
+export class NodeHttpServer implements HttpServer, SseServer {
   private routes = new Map<string, HttpHandler>();
+  private sseRoutes = new Map<string, (conn: SseConnection) => (() => void) | void>();
   private server?: Server;
 
   /** Pass `tls` to listen over HTTPS (default: plain HTTP, nothing changes). */
@@ -50,14 +63,31 @@ export class NodeHttpServer implements HttpServer {
     this.routes.set(`${method.toUpperCase()} ${path}`, handler);
   }
 
+  sse(path: string, onConnect: (conn: SseConnection) => (() => void) | void): void {
+    this.sseRoutes.set(path, onConnect);
+  }
+
   listen(port: number): Promise<void> {
     return new Promise((resolve) => {
       const onRequest = (req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse) => {
+        const path = (req.url ?? "/").split("?")[0] ?? "/";
+        const onConnect = (req.method ?? "GET").toUpperCase() === "GET" ? this.sseRoutes.get(path) : undefined;
+        if (onConnect) {
+          res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
+          const conn: SseConnection = {
+            send: (data, event) => {
+              if (event !== undefined) res.write(`event: ${event}\n`);
+              res.write(`data: ${JSON.stringify(data)}\n\n`);
+            },
+          };
+          const cleanup = onConnect(conn);
+          req.on("close", () => { if (cleanup) cleanup(); });
+          return;
+        }
         const chunks: Buffer[] = [];
         req.on("data", (c) => chunks.push(c as Buffer));
         req.on("end", () => {
           void (async () => {
-            const path = (req.url ?? "/").split("?")[0] ?? "/";
             const handler = this.routes.get(`${(req.method ?? "GET").toUpperCase()} ${path}`);
             if (!handler) { res.statusCode = 404; res.end(""); return; }
             const reqHeaders: Record<string, string> = {};
