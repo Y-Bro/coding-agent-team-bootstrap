@@ -1,10 +1,10 @@
 import type { SocketServer } from "../ports/transport.ts";
-import type { Broker } from "./broker.ts";
+import type { BrokerDispatch } from "./broker.ts";
 import type { Request, Response } from "./protocol.ts";
 
-/** Bridges the socket transport to Broker methods. Pure dispatch, injectable server. */
+/** Bridges the socket transport to the broker dispatch surface. Pure dispatch, injectable server. */
 export class BrokerDaemon {
-  constructor(private broker: Broker, private server: SocketServer) {}
+  constructor(private broker: BrokerDispatch, private server: SocketServer) {}
 
   async start(socketPath: string): Promise<void> {
     await this.server.listen(socketPath, (raw, reply) => {
