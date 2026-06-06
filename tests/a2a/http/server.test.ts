@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { A2AServer } from "../../../src/a2a/http/server.ts";
 import { FakeHttpServer } from "./fakes.ts";
 import { A2A_PATHS, JSON_RPC_ERRORS } from "../../../src/a2a/http/types.ts";
+import { BrokerAuthProvider, bearerHeader } from "../../../src/a2a/http/auth.ts";
+import { SeqIds } from "../../ports/fakes.ts";
 import type { AgentCard, Message } from "../../../src/a2a/index.ts";
 
 const card: AgentCard = {
@@ -50,15 +52,53 @@ test("unknown method returns a JSON-RPC methodNotFound error", async () => {
   assert.equal(body.error.code, JSON_RPC_ERRORS.methodNotFound);
 });
 
-async function post(body: string) {
+async function post(body: string, headers?: Record<string, string>) {
   const http = new FakeHttpServer();
   let called = false;
   new A2AServer(http, card, {
     onMessageSend: async ({ message }) => { called = true; return { message }; },
   }).register();
-  const res = await http.handle({ method: "POST", path: A2A_PATHS.rpc, body });
+  const res = await http.handle({ method: "POST", path: A2A_PATHS.rpc, body, headers });
   return { body: JSON.parse(res.body), called };
 }
+
+test("with auth: accepts message/send carrying a valid bearer", async () => {
+  const http = new FakeHttpServer();
+  const auth = new BrokerAuthProvider(new SeqIds());
+  const token = auth.issueToken("fe-writer");
+  let called = false;
+  new A2AServer(http, card, { onMessageSend: async ({ message }) => { called = true; return { message }; } }, auth).register();
+
+  const res = await http.handle({
+    method: "POST", path: A2A_PATHS.rpc, body: rpc("message/send", { message: msg }), headers: bearerHeader(token),
+  });
+  const body = JSON.parse(res.body);
+  assert.equal(body.result.message.id, "m1");
+  assert.equal(called, true);
+});
+
+test("with auth: rejects message/send with a missing bearer (unauthorized)", async () => {
+  const http = new FakeHttpServer();
+  const auth = new BrokerAuthProvider(new SeqIds());
+  let called = false;
+  new A2AServer(http, card, { onMessageSend: async ({ message }) => { called = true; return { message }; } }, auth).register();
+
+  const res = await http.handle({ method: "POST", path: A2A_PATHS.rpc, body: rpc("message/send", { message: msg }) });
+  const body = JSON.parse(res.body);
+  assert.equal(body.error.code, JSON_RPC_ERRORS.unauthorized);
+  assert.equal(called, false);
+});
+
+test("with auth: rejects message/send with an invalid bearer (unauthorized)", async () => {
+  const http = new FakeHttpServer();
+  const auth = new BrokerAuthProvider(new SeqIds());
+  new A2AServer(http, card, { onMessageSend: async ({ message }) => ({ message }) }, auth).register();
+
+  const res = await http.handle({
+    method: "POST", path: A2A_PATHS.rpc, body: rpc("message/send", { message: msg }), headers: bearerHeader("bogus"),
+  });
+  assert.equal(JSON.parse(res.body).error.code, JSON_RPC_ERRORS.unauthorized);
+});
 
 test("rejects a wrong jsonrpc version with invalidRequest", async () => {
   const { body, called } = await post(JSON.stringify({ jsonrpc: "1.0", id: 1, method: "message/send", params: { message: msg } }));
