@@ -1,4 +1,10 @@
 import { createServer, type Server } from "node:http";
+import { createServer as createHttpsServer } from "node:https";
+import { request as httpsRequest } from "node:https";
+
+/** Opt-in TLS material (PEM contents). `ca` lets a client trust a self-signed/private chain. */
+export interface TlsServerOptions { cert: string; key: string; ca?: string }
+export interface TlsClientOptions { ca?: string; cert?: string; key?: string }
 
 /** A received HTTP request (method + path + raw body + lowercased headers). */
 export interface HttpRequest {
@@ -37,13 +43,16 @@ export class NodeHttpServer implements HttpServer {
   private routes = new Map<string, HttpHandler>();
   private server?: Server;
 
+  /** Pass `tls` to listen over HTTPS (default: plain HTTP, nothing changes). */
+  constructor(private tls?: TlsServerOptions) {}
+
   route(method: string, path: string, handler: HttpHandler): void {
     this.routes.set(`${method.toUpperCase()} ${path}`, handler);
   }
 
   listen(port: number): Promise<void> {
     return new Promise((resolve) => {
-      this.server = createServer((req, res) => {
+      const onRequest = (req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse) => {
         const chunks: Buffer[] = [];
         req.on("data", (c) => chunks.push(c as Buffer));
         req.on("end", () => {
@@ -60,7 +69,10 @@ export class NodeHttpServer implements HttpServer {
             res.end(out.body);
           })();
         });
-      });
+      };
+      this.server = this.tls
+        ? createHttpsServer({ cert: this.tls.cert, key: this.tls.key, ca: this.tls.ca }, onRequest)
+        : createServer(onRequest);
       this.server.listen(port, () => resolve());
     });
   }
@@ -71,17 +83,39 @@ export class NodeHttpServer implements HttpServer {
 }
 
 export class NodeHttpClient implements HttpClient {
+  /** Pass `tls` to trust a custom CA / present a client cert on HTTPS calls. */
+  constructor(private tls?: TlsClientOptions) {}
+
   async request(url: string, init: { method: string; body?: string; headers?: Record<string, string> }): Promise<HttpResponse> {
-    const res = await fetch(url, {
-      method: init.method,
-      body: init.body,
-      headers: {
-        ...(init.body !== undefined ? { "content-type": "application/json" } : {}),
-        ...(init.headers ?? {}),
-      },
+    const headers = {
+      ...(init.body !== undefined ? { "content-type": "application/json" } : {}),
+      ...(init.headers ?? {}),
+    };
+    // HTTPS with explicit TLS material (e.g. a self-signed/private CA) goes via
+    // node:https so the CA is honored; everything else uses the default fetch path.
+    if (this.tls && url.startsWith("https:")) {
+      return this.requestTls(url, init.method, init.body, headers);
+    }
+    const res = await fetch(url, { method: init.method, body: init.body, headers });
+    const out: Record<string, string> = {};
+    res.headers.forEach((v, k) => { out[k] = v; });
+    return { status: res.status, body: await res.text(), headers: out };
+  }
+
+  private requestTls(url: string, method: string, body: string | undefined, headers: Record<string, string>): Promise<HttpResponse> {
+    return new Promise((resolve, reject) => {
+      const req = httpsRequest(url, { method, headers, ca: this.tls!.ca, cert: this.tls!.cert, key: this.tls!.key }, (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (c) => chunks.push(c as Buffer));
+        res.on("end", () => {
+          const out: Record<string, string> = {};
+          for (const [k, v] of Object.entries(res.headers)) out[k] = Array.isArray(v) ? v.join(", ") : (v ?? "");
+          resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString(), headers: out });
+        });
+      });
+      req.on("error", reject);
+      if (body !== undefined) req.write(body);
+      req.end();
     });
-    const headers: Record<string, string> = {};
-    res.headers.forEach((v, k) => { headers[k] = v; });
-    return { status: res.status, body: await res.text(), headers };
   }
 }
