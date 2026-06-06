@@ -44,6 +44,24 @@ test("A2ATransport delivers via the push-webhook when one is configured", async 
   assert.deepEqual(directSends, []);
 });
 
+test("A2ATransport routes delivery through the scheduler when one is injected", async () => {
+  const calls: string[] = [];
+  const scheduler = {
+    run: async <T>(agentId: string, call: () => Promise<T>): Promise<T> => {
+      calls.push(agentId);
+      return call();
+    },
+  };
+  const sent: string[] = [];
+  const endpoints: A2AEndpoints = {
+    clientFor: () => ({ sendMessage: async (m) => { sent.push(m.id); return m; } }),
+  };
+  const t = new A2ATransport(endpoints, undefined, scheduler);
+  await t.deliver(card("fe-reviewer"), msg);
+  assert.deepEqual(calls, ["fe-reviewer"], "delivery is gated by the scheduler, keyed by recipient");
+  assert.deepEqual(sent, ["m1"], "the wrapped call still delivers");
+});
+
 test("A2ATransport listen/close are no-ops at this milestone", async () => {
   const t = new A2ATransport({ clientFor: () => new SpySender() });
   await t.listen();
