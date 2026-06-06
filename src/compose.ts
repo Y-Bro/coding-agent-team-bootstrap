@@ -10,6 +10,8 @@ import { A2ATransport, type A2AEndpoints } from "./broker/a2a-transport.ts";
 import { A2AClient } from "./a2a/http/index.ts";
 import { NodeHttpClient } from "./ports/http.ts";
 import { selectRuntime } from "./runtime/select.ts";
+import { ServersRuntime, type AgentLink } from "./runtime/servers/servers.ts";
+import { NodeProcessSpawner } from "./ports/process.ts";
 import { Bootstrapper } from "./bootstrap/bootstrapper.ts";
 import { SystemClock } from "./ports/clock.ts";
 import { UuidGenerator } from "./ports/ids.ts";
@@ -39,29 +41,60 @@ function a2aEndpoints(cfg: TeamConfig): A2AEndpoints {
   };
 }
 
-/** Pick the broker's delivery transport from the team-wide runtime (Q6). */
-function selectTransport(cfg: TeamConfig, runtime: Runtime): Transport {
-  return cfg.runtime === "servers"
-    ? new A2ATransport(a2aEndpoints(cfg))
-    : new SocketTransport(runtime);
+/**
+ * The servers-mode link: register a spawned agent with the in-process broker
+ * (broker-mediated, per Q2) and notify it of waiting mail by pushing a status
+ * message to its A2A endpoint.
+ */
+function a2aLink(cfg: TeamConfig, broker: Broker, clock: SystemClock, ids: UuidGenerator): AgentLink {
+  const endpoints = a2aEndpoints(cfg);
+  return {
+    register: async (card) => { broker.register(card); },
+    notify: async (card, summary) => {
+      await endpoints.clientFor(card).sendMessage({
+        id: ids.next("m"), from: "broker", to: card.id, type: "status",
+        parts: [{ kind: "text", text: summary }], ts: clock.isoNow(),
+      });
+    },
+  };
 }
 
 export function buildContainer(cfg: TeamConfig, templates: Record<string, string>) {
   const fs = new NodeFileSystem();
   const registry = new AgentRegistry();
   const engines = resolveEngines(cfg);
-  const runtime: Runtime = selectRuntime(cfg, new NodeTmux(), engines);
-  const transport = selectTransport(cfg, runtime);
-
-  const broker = new Broker({
+  const clock = new SystemClock();
+  const ids = new UuidGenerator();
+  const makeBroker = (transport: Transport): Broker => new Broker({
     store: new JsonlStore(fs, ".team/messages.jsonl"),
     registry,
     router: new Router(registry),
     feed: new FeedRenderer(fs, ".team/feed.md"),
     transport,
-    clock: new SystemClock(),
-    ids: new UuidGenerator(),
+    clock,
+    ids,
   });
+
+  let runtime: Runtime;
+  let transport: Transport;
+  let broker: Broker;
+
+  if (cfg.runtime === "servers") {
+    // servers: A2A transport needs no runtime, so build broker first, then the
+    // ServersRuntime whose link registers with that broker. selectRuntime
+    // validates kind:"server" eligibility before the factory runs.
+    transport = new A2ATransport(a2aEndpoints(cfg));
+    broker = makeBroker(transport);
+    const link = a2aLink(cfg, broker, clock, ids);
+    runtime = selectRuntime(cfg, new NodeTmux(), engines,
+      () => new ServersRuntime({ spawner: new NodeProcessSpawner(), engines, link }));
+  } else {
+    // panes: SocketTransport wraps the runtime, so build the runtime first.
+    runtime = selectRuntime(cfg, new NodeTmux(), engines,
+      () => { throw new Error("servers runtime factory called in panes mode"); });
+    transport = new SocketTransport(runtime);
+    broker = makeBroker(transport);
+  }
 
   const daemon = new BrokerDaemon(broker, new NodeSocketServer());
   const bootstrapper = new Bootstrapper(cfg, { runtime, git: new NodeGit(), fs, engines, templates });
