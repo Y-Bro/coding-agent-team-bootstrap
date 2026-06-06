@@ -57,7 +57,7 @@ test("buildContainer wires a DirectMessenger only in servers + delivery:direct (
 
 test("buildContainer rejects delivery:direct in panes mode (no A2A endpoints)", () => {
   const cfg = { ...loadConfig("tests/config/fixtures/todo.yaml"), delivery: "direct" as const };
-  assert.throws(() => buildContainer(cfg, templates), /requires runtime: servers/);
+  assert.throws(() => buildContainer(cfg, templates), /every agent to run on the servers runtime/);
 });
 
 // a MIXED team: team default panes, one agent overridden to a server engine.
@@ -75,4 +75,15 @@ test("buildContainer bridges a mixed team: CompositeRuntime + CompositeTransport
   const c = buildContainer(mixedConfig(), templates);
   assert.ok(c.runtime instanceof CompositeRuntime);
   assert.ok(c.transport instanceof CompositeTransport);
+});
+
+test("buildContainer rejects delivery:direct on a MIXED team (>=1 pane agent has no A2A server)", () => {
+  // preserves the v3-m1 invariant: direct delivery requires every agent on servers
+  const cfg = { ...mixedConfig(), delivery: "direct" as const };
+  assert.throws(() => buildContainer(cfg, templates), /every agent to run on the servers runtime/);
+});
+
+test("buildContainer still allows delivery:direct when EVERY agent runs on servers", () => {
+  const c = buildContainer({ ...serversConfig(), delivery: "direct" }, templates);
+  assert.ok(c.messenger instanceof DirectMessenger);
 });

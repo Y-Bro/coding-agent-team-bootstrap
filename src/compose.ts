@@ -117,8 +117,13 @@ export function buildContainer(cfg: TeamConfig, templates: Record<string, string
   const needsServers = kinds.has("servers");
   const needsPanes = kinds.has("panes");
 
-  if (cfg.delivery === "direct" && !needsServers) {
-    throw new Error("delivery: direct requires runtime: servers (no A2A endpoints in panes mode)");
+  // Direct delivery is peer-to-peer over A2A, so EVERY agent must run an A2A
+  // server (v3-m1 invariant). In a mixed team a pane recipient has no A2A
+  // endpoint, so reject direct outright — mixed teams use delivery: broker, where
+  // the CompositeTransport bridges cross-runtime delivery. (Per-recipient
+  // direct/broker hybrid is a future refinement, out of m2 scope.)
+  if (cfg.delivery === "direct" && needsPanes) {
+    throw new Error("delivery: direct requires every agent to run on the servers runtime");
   }
 
   // The runtime is built last (its servers factory needs the broker), but the
