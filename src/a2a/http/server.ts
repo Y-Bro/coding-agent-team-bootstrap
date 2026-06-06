@@ -4,6 +4,7 @@ import {
   A2A_PATHS, A2A_METHOD_MESSAGE_SEND, JSON_RPC_ERRORS,
   type JsonRpcRequest, type MessageSendParams, type MessageSendResult,
 } from "./types.ts";
+import { authorize, type AuthProvider } from "./auth.ts";
 
 /** A valid JSON-RPC id is a string or a number (we don't accept null/missing for requests). */
 function isValidId(id: unknown): id is string | number {
@@ -29,6 +30,7 @@ export class A2AServer {
     private http: HttpServer,
     private card: AgentCard,
     private handler: A2ARequestHandler,
+    private auth?: AuthProvider,
   ) {}
 
   /** Register the agent-card and RPC routes on the injected HttpServer. */
@@ -58,6 +60,11 @@ export class A2AServer {
       }
       if (rpc.method !== A2A_METHOD_MESSAGE_SEND) {
         return json(200, this.error(rpc.id, JSON_RPC_ERRORS.methodNotFound, `unknown method: ${rpc.method}`));
+      }
+
+      // Require + validate the bearer token when an AuthProvider is configured.
+      if (this.auth && !authorize(req.headers, this.auth).ok) {
+        return json(200, this.error(rpc.id, JSON_RPC_ERRORS.unauthorized, "missing or invalid bearer token"));
       }
 
       // Validate message/send params.

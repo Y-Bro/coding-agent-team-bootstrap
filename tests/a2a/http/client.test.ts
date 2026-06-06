@@ -2,6 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { A2AClient } from "../../../src/a2a/http/client.ts";
 import { A2AServer } from "../../../src/a2a/http/server.ts";
+import { BrokerAuthProvider } from "../../../src/a2a/http/auth.ts";
+import { SeqIds } from "../../ports/fakes.ts";
 import { FakeHttpServer, FakeHttpClient } from "./fakes.ts";
 import type { AgentCard, Message } from "../../../src/a2a/index.ts";
 
@@ -31,6 +33,19 @@ test("sendMessage round-trips a message through message/send", async () => {
   const got = await wired().sendMessage(msg);
   assert.equal(got.id, "m1");
   assert.equal(got.type, "review_request");
+});
+
+test("with auth: a token-bearing client is accepted; a tokenless client is rejected", async () => {
+  const auth = new BrokerAuthProvider(new SeqIds());
+  const token = auth.issueToken("fe-writer");
+  const server = new FakeHttpServer();
+  new A2AServer(server, card, { onMessageSend: async ({ message }) => ({ message }) }, auth).register();
+
+  const authed = new A2AClient(new FakeHttpClient(server, BASE), BASE, token);
+  assert.equal((await authed.sendMessage(msg)).id, "m1");
+
+  const tokenless = new A2AClient(new FakeHttpClient(server, BASE), BASE);
+  await assert.rejects(() => tokenless.sendMessage(msg), /bearer token/);
 });
 
 test("sendMessage surfaces a JSON-RPC error as a thrown Error", async () => {

@@ -1,10 +1,11 @@
 import { createServer, type Server } from "node:http";
 
-/** A received HTTP request (method + path + raw body). */
+/** A received HTTP request (method + path + raw body + lowercased headers). */
 export interface HttpRequest {
   method: string;
   path: string;
   body: string;
+  headers?: Record<string, string>;
 }
 
 /** An HTTP response (status + raw body + optional response headers). */
@@ -29,7 +30,7 @@ export interface HttpServer {
 
 /** Minimal HTTP client seam: issue a request to a full URL, get a response. */
 export interface HttpClient {
-  request(url: string, init: { method: string; body?: string }): Promise<HttpResponse>;
+  request(url: string, init: { method: string; body?: string; headers?: Record<string, string> }): Promise<HttpResponse>;
 }
 
 export class NodeHttpServer implements HttpServer {
@@ -50,10 +51,12 @@ export class NodeHttpServer implements HttpServer {
             const path = (req.url ?? "/").split("?")[0] ?? "/";
             const handler = this.routes.get(`${(req.method ?? "GET").toUpperCase()} ${path}`);
             if (!handler) { res.statusCode = 404; res.end(""); return; }
-            const out = await handler({ method: req.method ?? "GET", path, body: Buffer.concat(chunks).toString() });
+            const reqHeaders: Record<string, string> = {};
+            for (const [k, v] of Object.entries(req.headers)) reqHeaders[k] = Array.isArray(v) ? v.join(", ") : (v ?? "");
+            const out = await handler({ method: req.method ?? "GET", path, body: Buffer.concat(chunks).toString(), headers: reqHeaders });
             res.statusCode = out.status;
-            const headers = out.headers ?? { "content-type": "application/json" };
-            for (const [k, v] of Object.entries(headers)) res.setHeader(k, v);
+            const resHeaders = out.headers ?? { "content-type": "application/json" };
+            for (const [k, v] of Object.entries(resHeaders)) res.setHeader(k, v);
             res.end(out.body);
           })();
         });
@@ -68,11 +71,14 @@ export class NodeHttpServer implements HttpServer {
 }
 
 export class NodeHttpClient implements HttpClient {
-  async request(url: string, init: { method: string; body?: string }): Promise<HttpResponse> {
+  async request(url: string, init: { method: string; body?: string; headers?: Record<string, string> }): Promise<HttpResponse> {
     const res = await fetch(url, {
       method: init.method,
       body: init.body,
-      headers: init.body !== undefined ? { "content-type": "application/json" } : undefined,
+      headers: {
+        ...(init.body !== undefined ? { "content-type": "application/json" } : {}),
+        ...(init.headers ?? {}),
+      },
     });
     const headers: Record<string, string> = {};
     res.headers.forEach((v, k) => { headers[k] = v; });
