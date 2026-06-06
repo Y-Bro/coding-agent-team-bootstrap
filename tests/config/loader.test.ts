@@ -58,3 +58,47 @@ test("loadConfig defaults messageTypes to the A2A vocabulary when omitted", () =
 test("loadConfig throws on duplicate agent ids", () => {
   assert.throws(() => loadConfig("tests/config/fixtures/dupe.yaml"), /duplicate/i);
 });
+
+test("servers block defaults: auth on, base port, and rate-limit knobs", () => {
+  const cfg = TeamConfigSchema.parse({
+    name: "t",
+    runtime: "servers",
+    agents: [{ id: "a", role: "writer", engine: "srv" }],
+  });
+  assert.equal(cfg.servers.host, "127.0.0.1");
+  assert.equal(cfg.servers.basePort, 41000);
+  assert.equal(cfg.servers.auth, true);
+  assert.equal(cfg.servers.rateLimit.maxConcurrency, 4);
+  assert.equal(cfg.servers.rateLimit.bucketCapacity, 8);
+  assert.equal(cfg.servers.rateLimit.refillPerSec, 2);
+});
+
+test("servers block honors explicit rate-limit + auth overrides", () => {
+  const cfg = TeamConfigSchema.parse({
+    name: "t",
+    runtime: "servers",
+    servers: { basePort: 50000, auth: false, rateLimit: { maxConcurrency: 1, bucketCapacity: 2, refillPerSec: 0.5 } },
+    agents: [{ id: "a", role: "writer", engine: "srv" }],
+  });
+  assert.equal(cfg.servers.basePort, 50000);
+  assert.equal(cfg.servers.auth, false);
+  assert.equal(cfg.servers.rateLimit.maxConcurrency, 1);
+  assert.equal(cfg.servers.rateLimit.refillPerSec, 0.5);
+});
+
+test("an agent may override its A2A port", () => {
+  const cfg = TeamConfigSchema.parse({
+    name: "t",
+    runtime: "servers",
+    agents: [{ id: "a", role: "writer", engine: "srv", port: 42042 }],
+  });
+  assert.equal(cfg.agents[0]!.port, 42042);
+});
+
+test("servers.rateLimit rejects a non-positive maxConcurrency", () => {
+  assert.throws(() => TeamConfigSchema.parse({
+    name: "t", runtime: "servers",
+    servers: { rateLimit: { maxConcurrency: 0 } },
+    agents: [{ id: "a", role: "writer", engine: "srv" }],
+  }));
+});
