@@ -70,6 +70,9 @@ export const TeamConfigSchema = z.object({
   name: z.string().min(1),
   root: z.string().default("."),
   runtime: z.enum(["panes", "servers"]).default("panes"),
+  // v3 (servers mode): "broker" = broker-mediated delivery (default, unchanged);
+  // "direct" = peer-to-peer A2A delivery with the broker as registry+observer.
+  delivery: z.enum(["broker", "direct"]).default("broker"),
   broker: Broker,
   servers: Servers,
   engines: z.record(EngineProfileSchema).optional(),

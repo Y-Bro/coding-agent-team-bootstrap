@@ -72,3 +72,49 @@ test("state rebuilds from the JSONL log on a new broker (unchanged)", async () =
   broker2.rebuild();
   assert.equal(broker2.inbox("b").length, 1);
 });
+
+test("observe logs + feeds + tracks inbox WITHOUT delivering over the transport (direct mode)", async () => {
+  const transport = new SpyTransport();
+  const { broker, fs } = makeBroker(transport);
+  broker.register(card({ id: "a" }));
+  broker.register(card({ id: "b" }));
+
+  // a message already delivered peer-to-peer; the broker only observes it
+  const m: Message = {
+    id: "m-direct-1", from: "a", to: "b", type: "note",
+    parts: [{ kind: "text", text: "direct hello" }], ts: "2026-06-06T00:00:00.000Z",
+  };
+  await broker.observe(m);
+
+  // NOT in the delivery path — the transport was never asked to deliver
+  assert.deepEqual(transport.delivered, []);
+  // durable log + feed recorded the message
+  assert.match(fs.read(".team/messages.jsonl"), /m-direct-1/);
+  assert.match(fs.read(".team/feed.md"), /direct hello/);
+  // inbox parity for live queries
+  assert.equal(broker.inbox("b").length, 1);
+});
+
+test("rebuild reconstructs full state purely from the observed JSONL log", async () => {
+  const transport = new SpyTransport();
+  const { broker, fs } = makeBroker(transport);
+  broker.register(card({ id: "a" }));
+  broker.register(card({ id: "b" }));
+  await broker.observe({
+    id: "m-obs-1", from: "a", to: "b", type: "note",
+    parts: [{ kind: "text", text: "logged via observe" }], ts: "2026-06-06T00:00:00.000Z",
+  });
+
+  // a fresh broker over the SAME log rebuilds the recipient's inbox, no transport
+  const registry2 = new AgentRegistry();
+  const broker2 = new Broker({
+    store: new JsonlStore(fs, ".team/messages.jsonl"),
+    registry: registry2, router: new Router(registry2),
+    feed: new FeedRenderer(fs, ".team/feed.md"),
+    transport, clock: new FixedClock(), ids: new SeqIds(),
+  });
+  broker2.register(card({ id: "b" }));
+  broker2.rebuild();
+  assert.equal(broker2.inbox("b").length, 1);
+  assert.deepEqual(transport.delivered, []);
+});

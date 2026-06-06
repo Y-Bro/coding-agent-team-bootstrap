@@ -84,6 +84,14 @@ test("layout rejects unknown tmux layout names", () => {
   }));
 });
 
+test("delivery defaults to broker-mediated and accepts direct", () => {
+  const def = TeamConfigSchema.parse({ name: "t", agents: [{ id: "a", role: "writer" }] });
+  assert.equal(def.delivery, "broker");
+  const direct = TeamConfigSchema.parse({ name: "t", delivery: "direct", agents: [{ id: "a", role: "writer" }] });
+  assert.equal(direct.delivery, "direct");
+  assert.throws(() => TeamConfigSchema.parse({ name: "t", delivery: "p2p", agents: [{ id: "a", role: "writer" }] }));
+});
+
 test("loadConfig defaults messageTypes to the A2A vocabulary when omitted", () => {
   const cfg = loadConfig("tests/config/fixtures/todo.yaml");
   assert.deepEqual(cfg.messageTypes, [...DEFAULT_MESSAGE_TYPES]);
