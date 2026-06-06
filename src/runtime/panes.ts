@@ -1,0 +1,25 @@
+import type { Runtime, SpawnCtx } from "./runtime.ts";
+import type { TmuxCommands } from "../ports/tmux.ts";
+import type { AgentCard } from "../a2a/index.ts";
+
+/** v1 runtime: each agent is a tmux pane; wake = send-keys nudge. */
+export class PanesRuntime implements Runtime {
+  constructor(private tmux: TmuxCommands, private session: string) {}
+
+  async spawn(agent: AgentCard, ctx: SpawnCtx): Promise<void> {
+    const target = `${this.session}:${agent.id}`;
+    this.tmux.run(["new-window", "-t", this.session, "-n", agent.id, "-c", agent.workdir]);
+    this.tmux.run(["send-keys", "-t", target,
+      `TEAM_AGENT_ID=${agent.id} TEAM_SOCKET=${ctx.socketPath} ${agent.cli}`, "Enter"]);
+  }
+
+  async wake(agentId: string, summary: string): Promise<void> {
+    const target = `${this.session}:${agentId}`;
+    this.tmux.run(["send-keys", "-t", target,
+      `# ▶ mail — ${summary} — run: team inbox`, "Enter"]);
+  }
+
+  async teardown(): Promise<void> {
+    this.tmux.run(["kill-session", "-t", this.session]);
+  }
+}
