@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Launchable `team` CLI: run the TypeScript entrypoint under tsx.
+# Kept separate from bin/team.ts so the .ts file stays shebang-free and loadable
+# as a module (a shebang breaks tsx's parser).
+set -euo pipefail
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exec node --import tsx "$DIR/team.ts" "$@"

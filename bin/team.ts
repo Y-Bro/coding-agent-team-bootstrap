@@ -1,4 +1,3 @@
-#!/usr/bin/env -S node --import tsx
 import { NodeSocketClient } from "../src/ports/transport.ts";
 import { BrokerClient } from "../src/client/rpc.ts";
 import { buildProgram } from "../src/client/cli.ts";
