@@ -4,6 +4,8 @@ import { buildContainer } from "../src/compose.ts";
 import { loadConfig } from "../src/config/index.ts";
 import { PanesRuntime } from "../src/runtime/panes.ts";
 import { ServersRuntime } from "../src/runtime/servers.ts";
+import { SocketTransport } from "../src/broker/transport.ts";
+import { A2ATransport } from "../src/broker/a2a-transport.ts";
 
 const templates = { lead: "# {{id}}", writer: "# {{id}}", reviewer: "# {{id}}" };
 
@@ -23,4 +25,14 @@ test("buildContainer selects the runtime from config", () => {
     templates,
   );
   assert.ok(servers.runtime instanceof ServersRuntime);
+});
+
+test("buildContainer selects the transport from config (socket vs a2a)", () => {
+  const panes = buildContainer(loadConfig("tests/config/fixtures/todo.yaml"), templates);
+  assert.ok(panes.transport instanceof SocketTransport);
+  const servers = buildContainer(
+    { ...loadConfig("tests/config/fixtures/todo.yaml"), runtime: "servers" as const },
+    templates,
+  );
+  assert.ok(servers.transport instanceof A2ATransport);
 });

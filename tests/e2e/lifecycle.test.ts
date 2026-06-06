@@ -29,7 +29,7 @@ test("after teamUp the broker stays alive and reachable (no process.exit)", asyn
     store: new JsonlStore(fs, join(dir, "messages.jsonl")),
     registry, router: new Router(registry),
     feed: new FeedRenderer(fs, join(dir, "feed.md")),
-    runtime: { async spawn() {}, async wake() {}, async teardown() {} },
+    transport: { async deliver() {}, async listen() {}, async close() {} },
     clock: new SystemClock(), ids: new UuidGenerator(),
   });
   broker.register({ id: "a", role: "writer", cli: "claude", engine: "claude", capabilities: [], skills: [], workdir: ".", subscribes: [] });

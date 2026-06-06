@@ -27,7 +27,8 @@ test("end-to-end: register two agents, send over the socket, recipient drains it
     store: new JsonlStore(fs, join(dir, "messages.jsonl")),
     registry, router: new Router(registry),
     feed: new FeedRenderer(fs, join(dir, "feed.md")),
-    runtime: noopRuntime, clock: new SystemClock(), ids: new UuidGenerator(),
+    transport: { async deliver() {}, async listen() {}, async close() {} },
+    clock: new SystemClock(), ids: new UuidGenerator(),
   });
   broker.register({ id: "a", role: "writer", cli: "claude", engine: "claude", capabilities: [], skills: [], workdir: ".", subscribes: [] });
   broker.register({ id: "b", role: "reviewer", cli: "codex", engine: "codex", capabilities: [], skills: [], workdir: ".", subscribes: ["review_request"] });

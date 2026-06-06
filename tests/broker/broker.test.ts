@@ -6,17 +6,19 @@ import { AgentRegistry } from "../../src/broker/registry.ts";
 import { Router } from "../../src/broker/router.ts";
 import { FeedRenderer } from "../../src/broker/feed.ts";
 import { MemoryFs, FixedClock, SeqIds } from "../ports/fakes.ts";
-import type { Runtime, SpawnCtx } from "../../src/runtime/runtime.ts";
-import type { AgentCard } from "../../src/a2a/index.ts";
+import type { Transport } from "../../src/broker/transport.ts";
+import type { AgentCard, Message } from "../../src/a2a/index.ts";
 
-class SpyRuntime implements Runtime {
-  woke: Array<{ id: string; summary: string }> = [];
-  async spawn(_a: AgentCard, _c: SpawnCtx): Promise<void> {}
-  async wake(id: string, summary: string): Promise<void> { this.woke.push({ id, summary }); }
-  async teardown(): Promise<void> {}
+class SpyTransport implements Transport {
+  delivered: Array<{ id: string; type: string; from: string }> = [];
+  async deliver(recipient: AgentCard, message: Message): Promise<void> {
+    this.delivered.push({ id: recipient.id, type: message.type, from: message.from });
+  }
+  async listen(): Promise<void> {}
+  async close(): Promise<void> {}
 }
 
-function makeBroker(runtime: Runtime) {
+function makeBroker(transport: Transport) {
   const fs = new MemoryFs();
   const registry = new AgentRegistry();
   const broker = new Broker({
@@ -24,7 +26,7 @@ function makeBroker(runtime: Runtime) {
     registry,
     router: new Router(registry),
     feed: new FeedRenderer(fs, ".team/feed.md"),
-    runtime,
+    transport,
     clock: new FixedClock(),
     ids: new SeqIds(),
   });
@@ -36,9 +38,9 @@ const card = (over: Partial<AgentCard>): AgentCard => ({
   workdir: ".", subscribes: [], ...over,
 });
 
-test("send routes, persists, wakes, and lands in recipient inbox", async () => {
-  const runtime = new SpyRuntime();
-  const { broker } = makeBroker(runtime);
+test("send routes, persists, delivers over the transport, and lands in recipient inbox", async () => {
+  const transport = new SpyTransport();
+  const { broker } = makeBroker(transport);
   broker.register(card({ id: "fe-writer", role: "writer" }));
   broker.register(card({ id: "fe-reviewer", role: "reviewer" }));
 
@@ -47,14 +49,15 @@ test("send routes, persists, wakes, and lands in recipient inbox", async () => {
 
   assert.equal(sent.id, "m1");
   assert.equal(sent.ts, "2026-06-06T00:00:00.000Z");
-  assert.deepEqual(runtime.woke, [{ id: "fe-reviewer", summary: "review_request from fe-writer" }]);
+  // routing resolved fe-reviewer, then delivered over the (fake) transport
+  assert.deepEqual(transport.delivered, [{ id: "fe-reviewer", type: "review_request", from: "fe-writer" }]);
   assert.equal(broker.inbox("fe-reviewer").length, 1);
   assert.equal(broker.inbox("fe-reviewer").length, 0);
 });
 
-test("state rebuilds from the JSONL log on a new broker", async () => {
-  const runtime = new SpyRuntime();
-  const { broker, fs } = makeBroker(runtime);
+test("state rebuilds from the JSONL log on a new broker (unchanged)", async () => {
+  const transport = new SpyTransport();
+  const { broker, fs } = makeBroker(transport);
   broker.register(card({ id: "a" })); broker.register(card({ id: "b" }));
   await broker.send({ from: "a", to: "b", type: "note", parts: [{ kind: "text", text: "hi" }] });
 
@@ -63,7 +66,7 @@ test("state rebuilds from the JSONL log on a new broker", async () => {
     store: new JsonlStore(fs, ".team/messages.jsonl"),
     registry: registry2, router: new Router(registry2),
     feed: new FeedRenderer(fs, ".team/feed.md"),
-    runtime, clock: new FixedClock(), ids: new SeqIds(),
+    transport, clock: new FixedClock(), ids: new SeqIds(),
   });
   broker2.register(card({ id: "b" }));
   broker2.rebuild();
