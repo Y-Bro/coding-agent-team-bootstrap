@@ -6,6 +6,8 @@ import { PanesRuntime } from "../src/runtime/panes.ts";
 import { ServersRuntime } from "../src/runtime/servers/servers.ts";
 import { SocketTransport } from "../src/broker/transport.ts";
 import { A2ATransport } from "../src/broker/a2a-transport.ts";
+import { CompositeTransport } from "../src/broker/composite-transport.ts";
+import { CompositeRuntime } from "../src/runtime/composite.ts";
 import { DirectMessenger } from "../src/a2a/direct.ts";
 import type { TeamConfig } from "../src/config/index.ts";
 
@@ -56,4 +58,21 @@ test("buildContainer wires a DirectMessenger only in servers + delivery:direct (
 test("buildContainer rejects delivery:direct in panes mode (no A2A endpoints)", () => {
   const cfg = { ...loadConfig("tests/config/fixtures/todo.yaml"), delivery: "direct" as const };
   assert.throws(() => buildContainer(cfg, templates), /requires runtime: servers/);
+});
+
+// a MIXED team: team default panes, one agent overridden to a server engine.
+function mixedConfig(): TeamConfig {
+  const base = loadConfig("tests/config/fixtures/todo.yaml"); // runtime: panes
+  return {
+    ...base,
+    engines: { srv: { command: "srv", roleFile: "AGENTS.md", kind: "server" } },
+    agents: base.agents.map((a, i) =>
+      i === 0 ? { ...a, runtime: "servers" as const, engine: "srv" } : a),
+  };
+}
+
+test("buildContainer bridges a mixed team: CompositeRuntime + CompositeTransport", () => {
+  const c = buildContainer(mixedConfig(), templates);
+  assert.ok(c.runtime instanceof CompositeRuntime);
+  assert.ok(c.transport instanceof CompositeTransport);
 });
