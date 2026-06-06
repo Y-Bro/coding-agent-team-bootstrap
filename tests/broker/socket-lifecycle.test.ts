@@ -56,6 +56,22 @@ test("a stale socket file (no live owner) is unlinked and listen succeeds", asyn
   await server.close();
 });
 
+test("listen creates the socket's parent dir on a fresh clone (no .team present)", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "team-fresh-"));
+  const path = join(root, ".team", "broker.sock"); // .team does NOT exist yet
+  assert.equal(existsSync(join(root, ".team")), false);
+  const server = new NodeSocketServer();
+  try {
+    await server.listen(path, () => {}); // must not throw EACCES/ENOENT for the missing dir
+  } catch (e) {
+    // Only a genuine sandbox bind block is skippable; a missing-dir ENOENT/EACCES is the bug.
+    if ((e as { code?: string } | null)?.code === "EPERM") { t.skip("loopback socket blocked under sandbox"); return; }
+    throw e;
+  }
+  assert.equal(existsSync(path), true, "socket bound under the freshly-created .team/");
+  await server.close();
+});
+
 test("starting two daemons on the same socket is graceful, not an unhandled crash", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "team-sock-"));
   const path = join(dir, "broker.sock");

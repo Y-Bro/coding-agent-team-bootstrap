@@ -1,5 +1,6 @@
 import { createServer, createConnection, type Server, type Socket } from "node:net";
-import { existsSync, unlinkSync } from "node:fs";
+import { existsSync, unlinkSync, mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 
 export interface SocketServer {
   listen(path: string, onMessage: (msg: unknown, reply: (r: unknown) => void) => void): Promise<void>;
@@ -34,6 +35,10 @@ export class NodeSocketServer implements SocketServer {
   private server?: Server;
 
   async listen(path: string, onMessage: (msg: unknown, reply: (r: unknown) => void) => void): Promise<void> {
+    // Ensure the socket's parent dir (e.g. .team/) exists — on a fresh clone it
+    // doesn't, and binding would otherwise crash with ENOENT/EACCES.
+    mkdirSync(dirname(path), { recursive: true });
+
     // Stale-socket handling: if the path exists, a live owner means we refuse
     // (clear error); a dead leftover from a crash is unlinked so we can bind.
     if (existsSync(path)) {
