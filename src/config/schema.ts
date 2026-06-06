@@ -11,18 +11,24 @@ const EngineProfileSchema = z.object({
   kind: z.enum(["repl", "server"]).default("repl"),
 });
 
-const Agent = z.object({
-  id: z.string().min(1),
-  role: z.string().min(1),
-  cli: z.enum(["claude", "codex"]).default("claude"),
-  engine: z.string().default("claude"),
-  workdir: z.string().default("."),
-  worktree: Worktree.optional(),
-  template: z.string().optional(),
-  capabilities: z.array(z.string()).default([]),
-  skills: z.array(z.string()).default([]),
-  subscribes: z.array(z.string()).default([]),
-});
+const Agent = z
+  .object({
+    id: z.string().min(1),
+    role: z.string().min(1),
+    cli: z.enum(["claude", "codex"]).default("claude"),
+    engine: z.string().optional(),
+    workdir: z.string().default("."),
+    worktree: Worktree.optional(),
+    template: z.string().optional(),
+    capabilities: z.array(z.string()).default([]),
+    skills: z.array(z.string()).default([]),
+    subscribes: z.array(z.string()).default([]),
+  })
+  .transform((a) => ({
+    ...a,
+    // engine defaults from cli when omitted; explicit engine always wins.
+    engine: a.engine ?? a.cli ?? "claude",
+  }));
 
 const Broker = z
   .object({
