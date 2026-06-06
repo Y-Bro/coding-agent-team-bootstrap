@@ -46,6 +46,8 @@ export const JSON_RPC_ERRORS = {
   methodNotFound: -32601,
   invalidParams: -32602,
   internalError: -32603,
+  /** 401-style: missing/invalid bearer token (implementation-defined range). */
+  unauthorized: -32001,
 } as const;
 
 /** `message/send` params: the message to deliver to this agent. */

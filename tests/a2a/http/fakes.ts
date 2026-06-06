@@ -21,8 +21,8 @@ export class FakeHttpServer implements HttpServer {
 /** In-memory HttpClient that dispatches into a FakeHttpServer for contract tests. */
 export class FakeHttpClient implements HttpClient {
   constructor(private server: FakeHttpServer, private base: string) {}
-  async request(url: string, init: { method: string; body?: string }): Promise<HttpResponse> {
+  async request(url: string, init: { method: string; body?: string; headers?: Record<string, string> }): Promise<HttpResponse> {
     const path = url.startsWith(this.base) ? url.slice(this.base.length) : url;
-    return this.server.handle({ method: init.method, path, body: init.body ?? "" });
+    return this.server.handle({ method: init.method, path, body: init.body ?? "", headers: init.headers });
   }
 }
