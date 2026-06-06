@@ -65,6 +65,23 @@ if (process.argv[2] === "up" || process.argv[2] === "down") {
   };
 
   if (process.argv[2] === "up") {
+    // --detach (-d): spawn a detached child running the normal foreground up
+    // path (without --detach), then free this terminal. The child holds the
+    // event loop and writes broker.pid (its own pid) via teamUp, so `team down`
+    // signals the right process.
+    const upArgs = process.argv.slice(3);
+    if (upArgs.includes("--detach") || upArgs.includes("-d")) {
+      const { spawn } = await import("node:child_process");
+      const { fileURLToPath } = await import("node:url");
+      const child = spawn(
+        process.execPath,
+        ["--import", import.meta.resolve("tsx"), fileURLToPath(import.meta.url), "up"],
+        { detached: true, stdio: "ignore", cwd: process.cwd(), env: process.env },
+      );
+      child.unref();
+      console.log(`team up (detached): ${cfg.name} — broker on ${socketPath} (\`team down\` to stop)`);
+      process.exit(0);
+    }
     const { BrokerAlreadyRunningError } = await import("../src/ports/transport.ts");
     try {
       const { daemon, bootstrapper } = buildContainer(cfg, templates);
