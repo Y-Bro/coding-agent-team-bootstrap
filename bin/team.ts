@@ -58,16 +58,23 @@ if (process.argv[2] === "up" || process.argv[2] === "down") {
     pid: process.pid,
     kill: (pid: number, signal: string) => { process.kill(pid, signal); },
     onShutdown: (handler: () => void) => { process.on("SIGINT", handler); process.on("SIGTERM", handler); },
+    onExit: (handler: () => void) => { process.on("exit", handler); },
   };
 
   if (process.argv[2] === "up") {
-    const { daemon, bootstrapper } = buildContainer(cfg, templates);
-    await teamUp(daemon, bootstrapper, socketPath, { fs, proc, pidfile });
-    console.log(`team up: ${cfg.name} — ${cfg.agents.length} agents on ${socketPath} (Ctrl-C or \`team down\` to stop)`);
-    // No process.exit: the socket server holds the event loop open so the broker
-    // stays reachable for later `team send`/`team inbox`.
+    const { BrokerAlreadyRunningError } = await import("../src/ports/transport.ts");
+    try {
+      const { daemon, bootstrapper } = buildContainer(cfg, templates);
+      await teamUp(daemon, bootstrapper, socketPath, { fs, proc, pidfile, socket: socketPath });
+      console.log(`team up: ${cfg.name} — ${cfg.agents.length} agents on ${socketPath} (Ctrl-C or \`team down\` to stop)`);
+      // No process.exit: the socket server holds the event loop open so the broker
+      // stays reachable for later `team send`/`team inbox`.
+    } catch (e) {
+      if (e instanceof BrokerAlreadyRunningError) { console.error(e.message); process.exit(1); }
+      throw e;
+    }
   } else {
-    const ok = await teamDown({ fs, proc, pidfile });
+    const ok = await teamDown({ fs, proc, pidfile, socket: socketPath });
     console.log(ok ? `team down: ${cfg.name}` : "team down: no running broker (no pidfile)");
     process.exit(ok ? 0 : 1);
   }

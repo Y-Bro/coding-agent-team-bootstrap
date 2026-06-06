@@ -1,4 +1,4 @@
-import type { SocketServer } from "../ports/transport.ts";
+import { type SocketServer, BrokerAlreadyRunningError } from "../ports/transport.ts";
 import type { BrokerDispatch } from "./broker.ts";
 import type { Request, Response } from "./protocol.ts";
 
@@ -7,9 +7,16 @@ export class BrokerDaemon {
   constructor(private broker: BrokerDispatch, private server: SocketServer) {}
 
   async start(socketPath: string): Promise<void> {
-    await this.server.listen(socketPath, (raw, reply) => {
-      void this.handle(raw as Request).then(reply);
-    });
+    try {
+      await this.server.listen(socketPath, (raw, reply) => {
+        void this.handle(raw as Request).then(reply);
+      });
+    } catch (e) {
+      // Normalize any raw bind collision into the clear "already running" signal.
+      if (e instanceof BrokerAlreadyRunningError) throw e;
+      if ((e as NodeJS.ErrnoException)?.code === "EADDRINUSE") throw new BrokerAlreadyRunningError();
+      throw e;
+    }
   }
 
   async stop(): Promise<void> {

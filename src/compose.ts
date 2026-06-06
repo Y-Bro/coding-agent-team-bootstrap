@@ -177,8 +177,8 @@ export async function runInitCommand(
 
   let prompter: Prompter;
   if (opts.yes) {
-    // Default preset: solo. Answers: team name, preset(1=solo), engine for the agent.
-    prompter = new ScriptedPrompter(["team", "1", firstAvailable]);
+    // Default preset: solo, panes. Answers: team name, runtime(1=panes), preset(1=solo), engine.
+    prompter = new ScriptedPrompter(["team", "1", "1", firstAvailable]);
     // ensure the chosen engine is offerable even if nothing is on PATH (--yes is headless)
     available.add(firstAvailable);
   } else {
