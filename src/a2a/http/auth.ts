@@ -6,7 +6,7 @@ import type { IdGenerator } from "../../ports/ids.ts";
  */
 export interface AuthProvider {
   /** Issue a bearer token for an agent (broker-mediated). */
-  issue(agentId: string): string;
+  issueToken(agentId: string): string;
   /** Validate a token; returns the agent id it was issued for, or null. */
   validate(token: string): string | null;
 }
@@ -46,7 +46,7 @@ export class BrokerAuthProvider implements AuthProvider {
 
   constructor(private ids: IdGenerator) {}
 
-  issue(agentId: string): string {
+  issueToken(agentId: string): string {
     const token = this.ids.next("tok");
     this.byToken.set(token, agentId);
     return token;

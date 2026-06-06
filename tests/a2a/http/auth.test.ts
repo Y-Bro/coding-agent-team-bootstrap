@@ -7,14 +7,14 @@ import { SeqIds } from "../../ports/fakes.ts";
 
 test("BrokerAuthProvider issues a token per agent and validates it back to the agent", () => {
   const auth = new BrokerAuthProvider(new SeqIds());
-  const tok = auth.issue("fe-writer");
+  const tok = auth.issueToken("fe-writer");
   assert.equal(auth.validate(tok), "fe-writer");
   assert.equal(auth.validate("bogus"), null);
 });
 
 test("distinct agents get distinct tokens", () => {
   const auth = new BrokerAuthProvider(new SeqIds());
-  assert.notEqual(auth.issue("a"), auth.issue("b"));
+  assert.notEqual(auth.issueToken("a"), auth.issueToken("b"));
 });
 
 test("bearerHeader / bearerToken round-trip the Authorization header", () => {
@@ -29,7 +29,7 @@ test("bearerHeader / bearerToken round-trip the Authorization header", () => {
 
 test("authorize accepts a valid bearer and reports the agent", () => {
   const auth = new BrokerAuthProvider(new SeqIds());
-  const tok = auth.issue("lead");
+  const tok = auth.issueToken("lead");
   const ok = authorize(bearerHeader(tok), auth);
   assert.deepEqual(ok, { ok: true, agentId: "lead" });
 });
