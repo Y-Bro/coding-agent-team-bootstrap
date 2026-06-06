@@ -50,6 +50,40 @@ test("loadConfig parses and defaults a valid team.yaml", () => {
   assert.deepEqual(cfg.agents[0]!.subscribes, []);
 });
 
+test("agent.window is optional and parsed when present", () => {
+  const cfg = TeamConfigSchema.parse({
+    name: "t",
+    agents: [
+      { id: "a", role: "writer", window: "pair" },
+      { id: "b", role: "reviewer", window: "pair" },
+      { id: "c", role: "lead" },
+    ],
+  });
+  assert.equal(cfg.agents[0]!.window, "pair");
+  assert.equal(cfg.agents[1]!.window, "pair");
+  assert.equal(cfg.agents[2]!.window, undefined);
+});
+
+test("top-level layout maps window name → tmux layout, defaults to {}", () => {
+  const base = TeamConfigSchema.parse({ name: "t", agents: [{ id: "a", role: "writer" }] });
+  assert.deepEqual(base.layout, {});
+
+  const cfg = TeamConfigSchema.parse({
+    name: "t",
+    layout: { pair: "main-vertical" },
+    agents: [{ id: "a", role: "writer", window: "pair" }],
+  });
+  assert.equal(cfg.layout.pair, "main-vertical");
+});
+
+test("layout rejects unknown tmux layout names", () => {
+  assert.throws(() => TeamConfigSchema.parse({
+    name: "t",
+    layout: { pair: "not-a-layout" },
+    agents: [{ id: "a", role: "writer" }],
+  }));
+});
+
 test("loadConfig defaults messageTypes to the A2A vocabulary when omitted", () => {
   const cfg = loadConfig("tests/config/fixtures/todo.yaml");
   assert.deepEqual(cfg.messageTypes, [...DEFAULT_MESSAGE_TYPES]);
