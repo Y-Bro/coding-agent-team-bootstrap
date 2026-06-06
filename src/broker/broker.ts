@@ -3,7 +3,7 @@ import type { MessageStore } from "./store.ts";
 import type { AgentDirectory } from "./registry.ts";
 import type { MessageRouter } from "./router.ts";
 import type { FeedWriter } from "./feed.ts";
-import type { Runtime } from "../runtime/runtime.ts";
+import type { Transport } from "./transport.ts";
 import type { Clock } from "../ports/clock.ts";
 import type { IdGenerator } from "../ports/ids.ts";
 
@@ -20,7 +20,7 @@ export interface BrokerDeps {
   registry: AgentDirectory;
   router: MessageRouter;
   feed: FeedWriter;
-  runtime: Runtime;
+  transport: Transport;
   clock: Clock;
   ids: IdGenerator;
 }
@@ -56,7 +56,8 @@ export class Broker implements BrokerDispatch {
     this.deps.feed.append(m);
     for (const id of recipients) {
       this.deliver(id, m);
-      await this.deps.runtime.wake(id, `${m.type} from ${m.from}`);
+      const card = this.deps.registry.get(id);
+      if (card) await this.deps.transport.deliver(card, m);
     }
     return m;
   }

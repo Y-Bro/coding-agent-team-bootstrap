@@ -72,7 +72,7 @@ test("routes a config-driven message by subscription over a real socket", async 
     store: new JsonlStore(fs, join(dir, "messages.jsonl")),
     registry, router: new Router(registry),
     feed: new FeedRenderer(fs, join(dir, "feed.md")),
-    runtime: { async spawn() {}, async wake() {}, async teardown() {} },
+    transport: { async deliver() {}, async listen() {}, async close() {} },
     clock: new SystemClock(), ids: new UuidGenerator(),
   });
   // register the whole team straight from config

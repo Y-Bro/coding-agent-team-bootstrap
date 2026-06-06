@@ -5,6 +5,10 @@ import { AgentRegistry } from "./broker/registry.ts";
 import { Router } from "./broker/router.ts";
 import { FeedRenderer } from "./broker/feed.ts";
 import { BrokerDaemon } from "./broker/daemon.ts";
+import { SocketTransport, type Transport } from "./broker/transport.ts";
+import { A2ATransport, type A2AEndpoints } from "./broker/a2a-transport.ts";
+import { A2AClient } from "./a2a/http/index.ts";
+import { NodeHttpClient } from "./ports/http.ts";
 import { selectRuntime } from "./runtime/select.ts";
 import { Bootstrapper } from "./bootstrap/bootstrapper.ts";
 import { SystemClock } from "./ports/clock.ts";
@@ -22,25 +26,46 @@ import { runWizard, writeConfigYaml } from "./cli/wizard.ts";
 import { formatDoctorReport } from "./cli/doctor-cmd.ts";
 import { TeamConfigSchema } from "./config/schema.ts";
 
+/** Base port for per-agent A2A endpoints in servers mode (v2-m3 assigns real ports). */
+const A2A_BASE_PORT = 41000;
+
+/** Build the A2A endpoint resolver: one A2AClient per agent at a localhost port. */
+function a2aEndpoints(cfg: TeamConfig): A2AEndpoints {
+  const http = new NodeHttpClient();
+  const indexById = new Map(cfg.agents.map((a, i) => [a.id, i] as const));
+  return {
+    clientFor: (recipient) =>
+      new A2AClient(http, `http://127.0.0.1:${A2A_BASE_PORT + (indexById.get(recipient.id) ?? 0)}`),
+  };
+}
+
+/** Pick the broker's delivery transport from the team-wide runtime (Q6). */
+function selectTransport(cfg: TeamConfig, runtime: Runtime): Transport {
+  return cfg.runtime === "servers"
+    ? new A2ATransport(a2aEndpoints(cfg))
+    : new SocketTransport(runtime);
+}
+
 export function buildContainer(cfg: TeamConfig, templates: Record<string, string>) {
   const fs = new NodeFileSystem();
   const registry = new AgentRegistry();
   const engines = resolveEngines(cfg);
   const runtime: Runtime = selectRuntime(cfg, new NodeTmux(), engines);
+  const transport = selectTransport(cfg, runtime);
 
   const broker = new Broker({
     store: new JsonlStore(fs, ".team/messages.jsonl"),
     registry,
     router: new Router(registry),
     feed: new FeedRenderer(fs, ".team/feed.md"),
-    runtime,
+    transport,
     clock: new SystemClock(),
     ids: new UuidGenerator(),
   });
 
   const daemon = new BrokerDaemon(broker, new NodeSocketServer());
   const bootstrapper = new Bootstrapper(cfg, { runtime, git: new NodeGit(), fs, engines, templates });
-  return { broker, daemon, bootstrapper, runtime };
+  return { broker, daemon, bootstrapper, runtime, transport };
 }
 
 /** Compose the `team doctor` collaborators: probe core tools + every known engine command. */
