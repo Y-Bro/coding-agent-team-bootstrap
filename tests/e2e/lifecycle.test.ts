@@ -36,9 +36,9 @@ test("after teamUp the broker stays alive and reachable (no process.exit)", asyn
   broker.register({ id: "b", role: "reviewer", cli: "codex", engine: "codex", capabilities: [], skills: [], workdir: ".", subscribes: ["review_request"] });
 
   const daemon = new BrokerDaemon(broker, new NodeSocketServer());
-  const proc: ProcessControl = { pid: 9999, kill() {}, onShutdown() {} };
+  const proc: ProcessControl = { pid: 9999, kill() {}, onShutdown() {}, onExit() {} };
 
-  await teamUp(daemon, noopBootstrap, sock, { fs, proc, pidfile });
+  await teamUp(daemon, noopBootstrap, sock, { fs, proc, pidfile, socket: sock });
   try {
     // pidfile recorded so `team down` can target the running daemon
     assert.equal(fs.read(pidfile), "9999");

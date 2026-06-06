@@ -16,14 +16,18 @@ export interface BootstrapLike {
 export interface ProcessControl {
   readonly pid: number;
   kill(pid: number, signal: string): void;
-  /** Register a clean-shutdown handler (SIGINT/SIGTERM). */
+  /** Register an async clean-shutdown handler (SIGINT/SIGTERM). */
   onShutdown(handler: () => void): void;
+  /** Register a synchronous best-effort cleanup on process exit. */
+  onExit(handler: () => void): void;
 }
 
 export interface LifecycleDeps {
   fs: FileSystem;
   proc: ProcessControl;
   pidfile: string;
+  /** The broker socket path — removed on shutdown/exit so a crash can't poison the next run. */
+  socket: string;
 }
 
 /**
@@ -48,10 +52,18 @@ export async function teamUp(
         await bootstrapper.down();
       } finally {
         await daemon.stop();
-        deps.fs.remove(deps.pidfile);
+        cleanup(deps);
       }
     })();
   });
+  // Synchronous backstop: a crash/exit must not leave a stale socket or pidfile.
+  deps.proc.onExit(() => cleanup(deps));
+}
+
+/** Remove the pidfile + socket so the next `team up` starts from a clean slate. */
+function cleanup(deps: LifecycleDeps): void {
+  deps.fs.remove(deps.pidfile);
+  deps.fs.remove(deps.socket);
 }
 
 /**
@@ -62,6 +74,6 @@ export async function teamDown(deps: LifecycleDeps, signal = "SIGTERM"): Promise
   if (!deps.fs.exists(deps.pidfile)) return false;
   const pid = Number(deps.fs.read(deps.pidfile).trim());
   deps.proc.kill(pid, signal);
-  deps.fs.remove(deps.pidfile);
+  cleanup(deps);
   return true;
 }
