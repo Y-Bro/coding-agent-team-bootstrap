@@ -36,7 +36,7 @@ test("reuses an existing worktree path instead of re-adding (idempotent)", () =>
 test("dedupes when multiple agents declare the same worktree path", () => {
   const wt = { branch: "feat/frontend", path: "frontend" };
   const agent = (id: string): AgentConfig => ({
-    id, role: "writer", cli: "claude", workdir: ".", worktree: wt,
+    id, role: "writer", cli: "claude", engine: "claude", workdir: ".", worktree: wt,
     capabilities: [], skills: [], subscribes: [],
   });
   const cfg = { agents: [agent("a"), agent("b")] } as unknown as TeamConfig;

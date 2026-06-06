@@ -21,6 +21,7 @@ import { MemoryFs } from "../ports/fakes.ts";
 import type { GitCommands } from "../../src/ports/git.ts";
 import type { Runtime, SpawnCtx } from "../../src/runtime/runtime.ts";
 import type { AgentCard } from "../../src/a2a/index.ts";
+import { resolveEngines } from "../../src/engines/index.ts";
 
 class SpyGit implements GitCommands {
   calls: string[][] = [];
@@ -46,7 +47,7 @@ test("bootstraps the vibe-do-list team from team.yaml: worktrees, cards, role fi
   const fs = new MemoryFs();
   const git = new SpyGit();
   const runtime = new SpyRuntime();
-  const boot = new Bootstrapper(cfg, { runtime, git, fs, templates: templates() });
+  const boot = new Bootstrapper(cfg, { runtime, git, fs, engines: resolveEngines(cfg), templates: templates() });
 
   await boot.up(".team/broker.sock");
 

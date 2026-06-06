@@ -1,6 +1,7 @@
 import type { TeamConfig } from "../config/index.ts";
 import type { Runtime } from "./runtime.ts";
 import type { TmuxCommands } from "../ports/tmux.ts";
+import type { EngineRegistry } from "../engines/index.ts";
 import { PanesRuntime } from "./panes.ts";
 import { ServersRuntime } from "./servers.ts";
 
@@ -10,9 +11,9 @@ import { ServersRuntime } from "./servers.ts";
  * future runtime means a new `case`, with the rest of the system unchanged
  * because everything depends on the `Runtime` seam.
  */
-export function selectRuntime(cfg: TeamConfig, tmux: TmuxCommands): Runtime {
+export function selectRuntime(cfg: TeamConfig, tmux: TmuxCommands, engines: EngineRegistry): Runtime {
   switch (cfg.runtime) {
     case "servers": return new ServersRuntime();
-    case "panes": return new PanesRuntime(tmux, cfg.name);
+    case "panes": return new PanesRuntime(tmux, cfg.name, engines);
   }
 }

@@ -5,6 +5,7 @@ import { PanesRuntime } from "../../src/runtime/panes.ts";
 import { ServersRuntime } from "../../src/runtime/servers.ts";
 import { loadConfig } from "../../src/config/index.ts";
 import type { TmuxCommands } from "../../src/ports/tmux.ts";
+import { resolveEngines } from "../../src/engines/index.ts";
 
 class SpyTmux implements TmuxCommands {
   run(): string { return ""; }
@@ -12,10 +13,10 @@ class SpyTmux implements TmuxCommands {
 
 test("selects PanesRuntime for runtime: panes", () => {
   const cfg = loadConfig("tests/config/fixtures/todo.yaml"); // runtime: panes
-  assert.ok(selectRuntime(cfg, new SpyTmux()) instanceof PanesRuntime);
+  assert.ok(selectRuntime(cfg, new SpyTmux(), resolveEngines({})) instanceof PanesRuntime);
 });
 
 test("selects ServersRuntime for runtime: servers", () => {
   const cfg = { ...loadConfig("tests/config/fixtures/todo.yaml"), runtime: "servers" as const };
-  assert.ok(selectRuntime(cfg, new SpyTmux()) instanceof ServersRuntime);
+  assert.ok(selectRuntime(cfg, new SpyTmux(), resolveEngines({})) instanceof ServersRuntime);
 });
