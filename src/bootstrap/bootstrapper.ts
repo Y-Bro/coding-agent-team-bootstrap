@@ -6,7 +6,7 @@ import { createWorktrees } from "./worktrees.ts";
 import { renderRoleFile, roleFileName, toCard } from "./roles.ts";
 import type { EngineRegistry } from "../engines/index.ts";
 import type { AgentCard } from "../a2a/index.ts";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 export interface BootstrapDeps {
   runtime: Runtime;
@@ -24,8 +24,10 @@ export class Bootstrapper {
   constructor(private cfg: TeamConfig, private deps: BootstrapDeps) {}
 
   async up(socketPath: string): Promise<void> {
-    createWorktrees(this.cfg, this.deps.git);
     const teamDir = this.deps.teamDir ?? ".team";
+    // git worktree commands must run inside the project repo (base = teamDir's
+    // parent), not the cwd `team up` happened to be invoked from.
+    createWorktrees(this.cfg, this.deps.git, dirname(teamDir));
     // CAVEAT: two agents sharing a workdir AND the same engine resolve to the
     // same role filename (e.g. CLAUDE.md / AGENTS.md), so the second write
     // clobbers the first. Give such agents distinct workdirs (or worktrees) if
