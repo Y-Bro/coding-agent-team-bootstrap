@@ -1,0 +1,17 @@
+name: todo-servers
+root: .
+runtime: servers
+servers:
+  host: 127.0.0.1
+  basePort: 45100
+  auth: true
+  rateLimit: { maxConcurrency: 2, bucketCapacity: 4, refillPerSec: 5 }
+engines:
+  srv:
+    command: "true"
+    roleFile: AGENTS.md
+    kind: server
+agents:
+  - { id: lead, role: lead, engine: srv }
+  - { id: writer, role: writer, engine: srv, subscribes: [ruling] }
+  - { id: reviewer, role: reviewer, engine: srv, subscribes: [review_request] }
