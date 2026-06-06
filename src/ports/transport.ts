@@ -1,4 +1,5 @@
 import { createServer, createConnection, type Server, type Socket } from "node:net";
+import { existsSync, unlinkSync } from "node:fs";
 
 export interface SocketServer {
   listen(path: string, onMessage: (msg: unknown, reply: (r: unknown) => void) => void): Promise<void>;
@@ -9,11 +10,39 @@ export interface SocketClient {
   request(path: string, msg: unknown): Promise<unknown>;
 }
 
+/** Raised when a live broker already owns the socket — never an unhandled EADDRINUSE. */
+export class BrokerAlreadyRunningError extends Error {
+  readonly code = "EADDRINUSE";
+  constructor() {
+    super("broker already running — run team down");
+    this.name = "BrokerAlreadyRunningError";
+  }
+}
+
+/** Probe whether a unix socket has a live listener (true if a connection succeeds). */
+export function probeLiveSocket(path: string, timeoutMs = 250): Promise<boolean> {
+  return new Promise((resolve) => {
+    const sock = createConnection(path);
+    const done = (live: boolean) => { sock.destroy(); resolve(live); };
+    sock.once("connect", () => done(true));
+    sock.once("error", () => done(false));
+    sock.setTimeout(timeoutMs, () => done(false));
+  });
+}
+
 export class NodeSocketServer implements SocketServer {
   private server?: Server;
-  listen(path: string, onMessage: (msg: unknown, reply: (r: unknown) => void) => void): Promise<void> {
-    return new Promise((resolve) => {
-      this.server = createServer((sock: Socket) => {
+
+  async listen(path: string, onMessage: (msg: unknown, reply: (r: unknown) => void) => void): Promise<void> {
+    // Stale-socket handling: if the path exists, a live owner means we refuse
+    // (clear error); a dead leftover from a crash is unlinked so we can bind.
+    if (existsSync(path)) {
+      if (await probeLiveSocket(path)) throw new BrokerAlreadyRunningError();
+      unlinkSync(path);
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      const server = createServer((sock: Socket) => {
         let buf = "";
         sock.on("data", (chunk) => {
           buf += chunk.toString();
@@ -25,9 +54,21 @@ export class NodeSocketServer implements SocketServer {
           }
         });
       });
-      this.server.listen(path, () => resolve());
+      this.server = server;
+      // Bind-time errors reject the listen promise instead of throwing unhandled.
+      const onListenError = (err: NodeJS.ErrnoException) => {
+        reject(err.code === "EADDRINUSE" ? new BrokerAlreadyRunningError() : err);
+      };
+      server.once("error", onListenError);
+      server.listen(path, () => {
+        server.removeListener("error", onListenError);
+        // Keep a persistent handler so a later socket error never crashes the daemon.
+        server.on("error", (e) => console.error(`broker socket error: ${e instanceof Error ? e.message : e}`));
+        resolve();
+      });
     });
   }
+
   close(): Promise<void> {
     return new Promise((resolve) => this.server ? this.server.close(() => resolve()) : resolve());
   }
