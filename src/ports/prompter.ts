@@ -34,6 +34,17 @@ export class ScriptedPrompter implements Prompter {
     return a;
   }
   async ask(_question?: string, _fallback?: string): Promise<string> { return this.next(); }
-  async select(_question?: string, _choices?: string[]): Promise<string> { return this.next(); }
+  async select(_question: string | undefined, choices?: string[]): Promise<string> {
+    const a = this.next();
+    // Mirror NodePrompter: a queued numeric answer is a 1-based index into the
+    // choices; a queued exact value (or no choices) is returned verbatim.
+    if (choices && choices.length > 0) {
+      const idx = Number(a) - 1;
+      if (Number.isInteger(idx) && idx >= 0 && idx < choices.length) return choices[idx]!;
+      if (choices.includes(a)) return a;
+      return choices[0]!;
+    }
+    return a;
+  }
   async confirm(_question?: string, _fallback?: boolean): Promise<boolean> { return this.next().toLowerCase().startsWith("y"); }
 }
