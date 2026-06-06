@@ -4,14 +4,16 @@ import {
   A2A_PATHS, A2A_METHOD_MESSAGE_SEND,
   type JsonRpcRequest, type JsonRpcResponse, type MessageSendParams, type MessageSendResult,
 } from "./types.ts";
+import { bearerHeader } from "./auth.ts";
 
 /**
  * Client for one remote agent's A2A-over-HTTP endpoint: fetch its AgentCard and
  * call `message/send`. Transport is the injected HttpClient; `baseUrl` is the
- * remote agent's origin (e.g. http://host:port).
+ * remote agent's origin (e.g. http://host:port). `token`, when set, is attached
+ * as a bearer on authenticated calls.
  */
 export class A2AClient {
-  constructor(private http: HttpClient, private baseUrl: string) {}
+  constructor(private http: HttpClient, private baseUrl: string, private token?: string) {}
 
   async fetchAgentCard(): Promise<AgentCard> {
     const res = await this.http.request(this.baseUrl + A2A_PATHS.agentCard, { method: "GET" });
@@ -25,6 +27,7 @@ export class A2AClient {
     };
     const res = await this.http.request(this.baseUrl + A2A_PATHS.rpc, {
       method: "POST", body: JSON.stringify(req),
+      headers: this.token !== undefined ? bearerHeader(this.token) : undefined,
     });
     const rpc = JSON.parse(res.body) as JsonRpcResponse<MessageSendResult>;
     if ("error" in rpc) throw new Error(rpc.error.message);
