@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { get } from "node:http";
 import { NodeHttpServer } from "../../src/ports/http.ts";
-import { MessageBus } from "../../src/broker/bus.ts";
+import { MemoryBus } from "../../src/broker/bus.ts";
 import type { Message } from "../../src/a2a/index.ts";
 
 function isSandboxNetError(e: unknown): boolean {
@@ -13,7 +13,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const PORT = 47533;
 
 test("NodeHttpServer.sse pushes a live event over a real socket when published", async (t) => {
-  const bus = new MessageBus();
+  const bus = new MemoryBus();
   const server = new NodeHttpServer();
   server.sse("/events", (conn) => bus.subscribe((m) => conn.send(m, "message")));
   try {
