@@ -15,7 +15,7 @@ import { BrokerAuthProvider, InProcessSecret, bearerHeader } from "./a2a/http/au
 import { randomBytes } from "node:crypto";
 import { throwIfRateLimited } from "./a2a/http/ratelimit.ts";
 import { NodeHttpClient, NodeHttpServer, type TlsClientOptions } from "./ports/http.ts";
-import { MessageBus } from "./broker/bus.ts";
+import { MemoryBus } from "./broker/bus.ts";
 import { DashboardServer } from "./dashboard/server.ts";
 import type { AgentCard } from "./a2a/index.ts";
 import { selectRuntime, effectiveRuntime } from "./runtime/select.ts";
@@ -42,6 +42,13 @@ import { TeamConfigSchema } from "./config/schema.ts";
 import { dirname, join } from "node:path";
 
 type TokenFor = (agentId: string) => string | undefined;
+
+function makeBus(kind: "memory"): MemoryBus {
+  switch (kind) {
+    case "memory": return new MemoryBus();
+    default: throw new Error(`unknown bus.kind: ${kind as string}`);
+  }
+}
 
 /** The recipient's reachable A2A base URL: its advertised card url, else discovery (config). */
 function urlOf(discovery: DiscoveryProvider, recipient: AgentCard): string {
@@ -101,9 +108,9 @@ export function buildContainer(cfg: TeamConfig, templates: Record<string, string
   // (absolute socket under base/.team) keeps its messages/feed/cards together.
   const teamDir = dirname(cfg.broker.socket);
   const store = new JsonlStore(fs, join(teamDir, "messages.jsonl"));
-  // Read-only dashboard (opt-in): a MessageBus fans recorded messages out to the
-  // dashboard's live SSE feed. Absent → broker.publisher stays undefined (no cost).
-  const bus = cfg.dashboard.enabled ? new MessageBus() : undefined;
+  // Observer fan-out is ALWAYS constructed (config-selected) so task projection
+  // and sweep work headless; the dashboard becomes one more subscriber.
+  const bus = makeBus(cfg.bus.kind);
   const makeBroker = (transport: Transport): Broker => new Broker({
     store,
     registry,
@@ -209,7 +216,7 @@ export function buildContainer(cfg: TeamConfig, templates: Record<string, string
 
   // Opt-in read-only dashboard, served from the broker process on its own port.
   let dashboard: { server: DashboardServer; port: number } | undefined;
-  if (bus) {
+  if (cfg.dashboard.enabled) {
     const server = new DashboardServer({ server: new NodeHttpServer(), store, registry, subscriber: bus });
     server.register();
     dashboard = { server, port: cfg.dashboard.port };

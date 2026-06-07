@@ -102,6 +102,10 @@ const Dashboard = z
   })
   .default({});
 
+/** Observer fan-out backend. Only the in-process MemoryBus ships in v3.1; the
+ * field is the seam for a future network pub/sub (Kafka, Google Pub/Sub). */
+const Bus = z.object({ kind: z.enum(["memory"]).default("memory") }).default({});
+
 export const TeamConfigSchema = z.object({
   name: z.string().min(1),
   root: z.string().default("."),
@@ -112,6 +116,7 @@ export const TeamConfigSchema = z.object({
   broker: Broker,
   servers: Servers,
   dashboard: Dashboard,
+  bus: Bus,
   engines: z.record(EngineProfileSchema).optional(),
   agents: z.array(Agent).min(1),
   windows: z.array(z.string()).default([]),
