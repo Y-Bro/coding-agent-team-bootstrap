@@ -16,6 +16,8 @@ import { randomBytes } from "node:crypto";
 import { throwIfRateLimited } from "./a2a/http/ratelimit.ts";
 import { NodeHttpClient, NodeHttpServer, type TlsClientOptions } from "./ports/http.ts";
 import { MemoryBus } from "./broker/bus.ts";
+import { TaskMachine } from "./broker/tasks.ts";
+import { TaskProjector } from "./broker/task-projector.ts";
 import { DashboardServer } from "./dashboard/server.ts";
 import type { AgentCard } from "./a2a/index.ts";
 import { selectRuntime, effectiveRuntime } from "./runtime/select.ts";
@@ -183,6 +185,14 @@ export function buildContainer(cfg: TeamConfig, templates: Record<string, string
 
   const broker = makeBroker(transport);
 
+  // Task projection: derive A2A task state from real traffic by observing the bus
+  // (observer only, never in the delivery path). rebuild() restores state from the
+  // persisted task_status log before live events flow.
+  const taskMachine = new TaskMachine(store, clock, ids);
+  const taskProjector = new TaskProjector(taskMachine);
+  bus.subscribe((m) => taskProjector.handle(m));
+  taskMachine.rebuild();
+
   // The servers runtime's link registers spawned agents with THIS broker.
   const makeServersRuntime = needsServers
     ? () => new ServersRuntime({
@@ -222,7 +232,7 @@ export function buildContainer(cfg: TeamConfig, templates: Record<string, string
     dashboard = { server, port: cfg.dashboard.port };
   }
 
-  return { broker, daemon, bootstrapper, runtime, transport, messenger, dashboard };
+  return { broker, daemon, bootstrapper, runtime, transport, messenger, dashboard, taskMachine };
 }
 
 /** Compose the `team doctor` collaborators: probe core tools + every known engine command. */
