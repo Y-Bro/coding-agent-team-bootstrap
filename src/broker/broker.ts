@@ -8,6 +8,9 @@ import type { MessagePublisher } from "./bus.ts";
 import type { Clock } from "../ports/clock.ts";
 import type { IdGenerator } from "../ports/ids.ts";
 
+/** Log record type marking messages an agent has consumed (the delivery watermark). */
+export const ACK_EVENT_TYPE = "inbox_ack";
+
 export interface SendInput {
   from: string;
   to: string;
@@ -35,7 +38,8 @@ export interface BrokerDispatch {
   send(input: SendInput): Promise<Message>;
   /** Record a peer-to-peer-delivered message (observer role, not in delivery path). */
   observe(message: Message): Promise<void>;
-  inbox(agentId: string): Message[];
+  peek(agentId: string): Message[];
+  ack(agentId: string, ids: string[]): void;
 }
 
 /**
@@ -83,17 +87,36 @@ export class Broker implements BrokerDispatch, MessageObserver {
     this.record(m, this.safeResolve(m.to, m.type));
   }
 
-  /** Drain and return this agent's pending messages. */
-  inbox(agentId: string): Message[] {
-    const msgs = this.inboxes.get(agentId) ?? [];
-    this.inboxes.set(agentId, []);
-    return msgs;
+  /** Non-destructive read of this agent's pending messages. */
+  peek(agentId: string): Message[] {
+    return [...(this.inboxes.get(agentId) ?? [])];
   }
 
-  /** Rebuild inbox state by replaying the persisted log (no re-wake, no re-append). */
+  /** Mark messages consumed: drop them from the inbox and persist an ack record
+   * so the watermark survives a restart (rebuild skips acked ids). */
+  ack(agentId: string, ids: string[]): void {
+    if (ids.length === 0) return;
+    const drop = new Set(ids);
+    const box = (this.inboxes.get(agentId) ?? []).filter((m) => !drop.has(m.id));
+    this.inboxes.set(agentId, box);
+    this.deps.store.append({
+      id: this.deps.ids.next("m"), from: agentId, to: "broker", type: ACK_EVENT_TYPE,
+      parts: [{ kind: "data", data: { agentId, ids } }], ts: this.deps.clock.isoNow(),
+    });
+  }
+
+  /** Rebuild inbox state from the log, honoring ack records (no re-delivery of
+   * already-consumed messages). Acks always follow their messages chronologically,
+   * so a single in-order pass is correct. */
   rebuild(): void {
     this.inboxes.clear();
     for (const m of this.deps.store.replay()) {
+      if (m.type === ACK_EVENT_TYPE) {
+        const { agentId, ids } = m.parts.find((p) => p.kind === "data")?.data as { agentId: string; ids: string[] };
+        const drop = new Set(ids);
+        this.inboxes.set(agentId, (this.inboxes.get(agentId) ?? []).filter((x) => !drop.has(x.id)));
+        continue;
+      }
       for (const id of this.safeResolve(m.to, m.type)) this.deliver(id, m);
     }
   }

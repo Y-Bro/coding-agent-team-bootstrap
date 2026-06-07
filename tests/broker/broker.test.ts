@@ -51,8 +51,44 @@ test("send routes, persists, delivers over the transport, and lands in recipient
   assert.equal(sent.ts, "2026-06-06T00:00:00.000Z");
   // routing resolved fe-reviewer, then delivered over the (fake) transport
   assert.deepEqual(transport.delivered, [{ id: "fe-reviewer", type: "review_request", from: "fe-writer" }]);
-  assert.equal(broker.inbox("fe-reviewer").length, 1);
-  assert.equal(broker.inbox("fe-reviewer").length, 0);
+  assert.equal(broker.peek("fe-reviewer").length, 1);
+  broker.ack("fe-reviewer", [sent.id]);
+  assert.equal(broker.peek("fe-reviewer").length, 0);
+});
+
+test("peek is non-destructive; ack removes only acked ids", async () => {
+  const { broker } = makeBroker(new SpyTransport());
+  broker.register(card({ id: "lead" }));
+  broker.register(card({ id: "writer" }));
+  await broker.send({ from: "lead", to: "writer", type: "note", parts: [{ kind: "text", text: "1" }] });
+  await broker.send({ from: "lead", to: "writer", type: "note", parts: [{ kind: "text", text: "2" }] });
+  const first = broker.peek("writer");
+  assert.equal(first.length, 2);
+  assert.equal(broker.peek("writer").length, 2); // still there (non-destructive)
+  broker.ack("writer", [first[0]!.id]);
+  const rest = broker.peek("writer");
+  assert.equal(rest.length, 1);
+  assert.equal(rest[0]!.id, first[1]!.id);
+});
+
+test("rebuild skips acked messages (watermark survives restart)", async () => {
+  const { broker, fs } = makeBroker(new SpyTransport());
+  broker.register(card({ id: "lead" }));
+  broker.register(card({ id: "writer" }));
+  await broker.send({ from: "lead", to: "writer", type: "note", parts: [{ kind: "text", text: "1" }] });
+  const m = broker.peek("writer")[0]!;
+  broker.ack("writer", [m.id]);
+
+  const registry2 = new AgentRegistry();
+  const fresh = new Broker({
+    store: new JsonlStore(fs, ".team/messages.jsonl"),
+    registry: registry2, router: new Router(registry2),
+    feed: new FeedRenderer(fs, ".team/feed.md"),
+    transport: new SpyTransport(), clock: new FixedClock(), ids: new SeqIds(),
+  });
+  fresh.register(card({ id: "writer" }));
+  fresh.rebuild();
+  assert.equal(fresh.peek("writer").length, 0); // acked message not re-delivered
 });
 
 test("state rebuilds from the JSONL log on a new broker (unchanged)", async () => {
@@ -70,7 +106,7 @@ test("state rebuilds from the JSONL log on a new broker (unchanged)", async () =
   });
   broker2.register(card({ id: "b" }));
   broker2.rebuild();
-  assert.equal(broker2.inbox("b").length, 1);
+  assert.equal(broker2.peek("b").length, 1);
 });
 
 test("observe logs + feeds + tracks inbox WITHOUT delivering over the transport (direct mode)", async () => {
@@ -92,7 +128,7 @@ test("observe logs + feeds + tracks inbox WITHOUT delivering over the transport 
   assert.match(fs.read(".team/messages.jsonl"), /m-direct-1/);
   assert.match(fs.read(".team/feed.md"), /direct hello/);
   // inbox parity for live queries
-  assert.equal(broker.inbox("b").length, 1);
+  assert.equal(broker.peek("b").length, 1);
 });
 
 test("rebuild reconstructs full state purely from the observed JSONL log", async () => {
@@ -115,6 +151,6 @@ test("rebuild reconstructs full state purely from the observed JSONL log", async
   });
   broker2.register(card({ id: "b" }));
   broker2.rebuild();
-  assert.equal(broker2.inbox("b").length, 1);
+  assert.equal(broker2.peek("b").length, 1);
   assert.deepEqual(transport.delivered, []);
 });
