@@ -21,5 +21,5 @@ test("send returns the created message", async () => {
 test("a broker error throws with the message", async () => {
   const transport = new FakeClient(() => ({ ok: false, error: "unknown target: zzz" }));
   const client = new BrokerClient(transport, ".team/broker.sock");
-  await assert.rejects(() => client.inbox("a"), /unknown target/);
+  await assert.rejects(() => client.peek("a"), /unknown target/);
 });

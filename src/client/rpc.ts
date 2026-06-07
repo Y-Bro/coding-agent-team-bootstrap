@@ -27,7 +27,8 @@ export class BrokerClient implements MessageObserver {
   }
   /** Post an observer copy of an already-delivered (direct) message to the broker. */
   async observe(message: Message): Promise<void> { await this.call("message/observe", { message }); }
-  inbox(agentId: string): Promise<Message[]> { return this.call("inbox/read", { agentId }) as Promise<Message[]>; }
+  peek(agentId: string): Promise<Message[]> { return this.call("inbox/peek", { agentId }) as Promise<Message[]>; }
+  async ack(agentId: string, ids: string[]): Promise<void> { await this.call("inbox/ack", { agentId, ids }); }
   list(): Promise<AgentCard[]> { return this.call("agent/list", {}) as Promise<AgentCard[]>; }
   register(card: unknown): Promise<void> { return this.call("agent/register", { card }) as Promise<void>; }
 }

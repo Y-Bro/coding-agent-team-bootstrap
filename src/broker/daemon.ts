@@ -36,8 +36,11 @@ export class BrokerDaemon {
         case "message/observe":
           await this.broker.observe(req.params.message);
           return { ok: true, result: null };
-        case "inbox/read":
-          return { ok: true, result: this.broker.inbox(req.params.agentId) };
+        case "inbox/peek":
+          return { ok: true, result: this.broker.peek(req.params.agentId) };
+        case "inbox/ack":
+          this.broker.ack(req.params.agentId, req.params.ids);
+          return { ok: true, result: null };
         default:
           return { ok: false, error: `unknown method` };
       }

@@ -7,7 +7,8 @@ function fakeClient() {
   return {
     calls,
     send: async (p: any) => { calls.push(["send", p]); return { id: "m1" }; },
-    inbox: async (id: string) => { calls.push(["inbox", id]); return [{ id: "m1", from: "a", type: "note", parts: [{ kind: "text", text: "hi" }] }]; },
+    peek: async (id: string) => { calls.push(["peek", id]); return [{ id: "m1", from: "a", type: "note", parts: [{ kind: "text", text: "hi" }] }]; },
+    ack: async (id: string, ids: string[]) => { calls.push(["ack", id, ids]); },
     list: async () => { calls.push(["list"]); return [{ id: "a", role: "writer" }]; },
     register: async () => {},
   };
@@ -27,4 +28,6 @@ test("`inbox` prints drained messages", async () => {
   const program = buildProgram(client as any, "fe-reviewer", (s) => out.push(s));
   await program.parseAsync(["inbox"], { from: "user" });
   assert.match(out.join("\n"), /note.*hi/s);
+  // peek-then-ack: the printed message is acked by id
+  assert.deepEqual(client.calls.find((c) => c[0] === "ack"), ["ack", "fe-reviewer", ["m1"]]);
 });

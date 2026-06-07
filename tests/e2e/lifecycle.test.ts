@@ -45,7 +45,7 @@ test("after teamUp the broker stays alive and reachable (no process.exit)", asyn
     // the daemon is still listening — a real client round-trips
     const client = new BrokerClient(new NodeSocketClient(), sock);
     await client.send({ from: "a", to: "b", type: "review_request", parts: [{ kind: "text", text: "hi" }] });
-    assert.equal((await client.inbox("b")).length, 1);
+    assert.equal((await client.peek("b")).length, 1);
   } finally {
     await daemon.stop();
   }

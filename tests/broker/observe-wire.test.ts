@@ -69,7 +69,7 @@ test("a separate-process agent posts its observer copy over the socket; rebuild 
 
     // broker logged it WITHOUT delivering over its transport
     assert.deepEqual(transport.delivered, []);
-    assert.equal(broker.inbox("b").length, 1);
+    assert.equal(broker.peek("b").length, 1);
 
     // a fresh broker over the same log rebuilds the recipient's inbox
     const registry2 = new AgentRegistry();
@@ -81,7 +81,7 @@ test("a separate-process agent posts its observer copy over the socket; rebuild 
     });
     broker2.register(card("b", { subscribes: ["review_request"] }));
     broker2.rebuild();
-    assert.equal(broker2.inbox("b").length, 1);
+    assert.equal(broker2.peek("b").length, 1);
   } finally {
     await daemon.stop();
   }
