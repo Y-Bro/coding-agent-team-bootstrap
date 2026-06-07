@@ -64,7 +64,7 @@ test("end-to-end (servers): broker delivers over real loopback HTTP with bearer 
     assert.match(writerSink[0]!.authorization ?? "", /^Bearer \S+/, "broker-issued bearer attached on the wire");
 
     // Local inbox also carries it (broker-mediated routing, Q2).
-    const inbox = broker.inbox("writer");
+    const inbox = broker.peek("writer");
     assert.equal(inbox.length, 1);
     assert.equal(inbox[0]!.type, "ruling");
 

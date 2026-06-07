@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { MessageBus } from "../../src/broker/bus.ts";
+import { MemoryBus } from "../../src/broker/bus.ts";
 import { Broker } from "../../src/broker/broker.ts";
 import { JsonlStore } from "../../src/broker/store.ts";
 import { AgentRegistry } from "../../src/broker/registry.ts";
@@ -19,18 +19,29 @@ const card = (id: string): AgentCard => ({
   id, role: "writer", cli: "claude", engine: "claude", capabilities: [], skills: [], workdir: ".", subscribes: [],
 });
 
-test("MessageBus fans out to subscribers and stops after unsubscribe", () => {
-  const bus = new MessageBus();
+const msg = (id: string): Message => ({
+  id, from: "a", to: "b", type: "note", parts: [{ kind: "text", text: "x" }], ts: "2026-06-07T00:00:00Z",
+});
+
+test("MemoryBus.publish returns a promise and fans out to subscribers", async () => {
+  const bus = new MemoryBus();
+  const seen: string[] = [];
+  bus.subscribe((m) => seen.push(m.id));
+  await bus.publish(msg("m1"));
+  assert.deepEqual(seen, ["m1"]);
+});
+
+test("MemoryBus.subscribe returns an unsubscribe handle", async () => {
+  const bus = new MemoryBus();
   const seen: string[] = [];
   const off = bus.subscribe((m) => seen.push(m.id));
-  bus.publish({ id: "1" } as Message);
   off();
-  bus.publish({ id: "2" } as Message);
-  assert.deepEqual(seen, ["1"]);
+  await bus.publish(msg("m2"));
+  assert.deepEqual(seen, []);
 });
 
 test("the broker publishes every recorded message to the bus", async () => {
-  const bus = new MessageBus();
+  const bus = new MemoryBus();
   const published: string[] = [];
   bus.subscribe((m) => published.push(m.type));
   const fs = new MemoryFs();

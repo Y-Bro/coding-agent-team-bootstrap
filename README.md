@@ -31,7 +31,7 @@ parts, and a task state machine.
 - **Pluggable engines** — built-in profiles for claude, codex, cursor-agent,
   opencode, gemini, aider; add your own without touching code.
 - **Strict DI / testable** — every side effect lives behind a port; the whole
-  system has a single composition root. 234 tests, all headless.
+  system has a single composition root. 266 tests, all headless.
 - **Crash-safe** — state is rebuilt by replaying the message log.
 
 ## Requirements
@@ -255,7 +255,7 @@ send/cancel/control endpoints.
 ## Testing
 
 ```bash
-npm test          # node --import tsx --test "tests/**/*.test.ts"  (234 tests)
+npm test          # node --import tsx --test "tests/**/*.test.ts"  (266 tests)
 npm run typecheck # tsc -p tsconfig.json (strict, noEmit)
 ```
 

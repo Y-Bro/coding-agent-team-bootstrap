@@ -5,7 +5,8 @@ export type Request =
   | { method: "agent/list"; params: {} }
   | { method: "message/send"; params: { from: string; to: string; type: string; parts: Part[]; task?: string } }
   | { method: "message/observe"; params: { message: Message } }
-  | { method: "inbox/read"; params: { agentId: string } };
+  | { method: "inbox/peek"; params: { agentId: string } }
+  | { method: "inbox/ack"; params: { agentId: string; ids: string[] } };
 
 export type Response =
   | { ok: true; result: unknown }

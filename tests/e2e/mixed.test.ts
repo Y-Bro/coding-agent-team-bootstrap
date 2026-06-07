@@ -68,13 +68,13 @@ test("mixed team: messages cross the pane<->server boundary in both directions",
     await broker.send({ from: "pw", to: "sr", type: "review_request", parts: [{ kind: "text", text: "PR #7" }] });
     assert.equal(received.length, 1, "server agent received pane->server over real HTTP");
     assert.equal(received[0]!.from, "pw");
-    assert.equal(broker.inbox("sr").length, 1);
+    assert.equal(broker.peek("sr").length, 1);
 
     // server -> pane: bridged to the socket transport; the pane is woken (no throw)
     // and the message lands in the pane agent's broker inbox to pull.
     await broker.send({ from: "sr", to: "pw", type: "note", parts: [{ kind: "text", text: "thanks" }] });
     assert.equal(received.length, 1, "server->pane must NOT go over the server's HTTP webhook");
-    const inbox = broker.inbox("pw");
+    const inbox = broker.peek("pw");
     assert.equal(inbox.length, 1);
     assert.equal((inbox[0]!.parts[0] as { text: string }).text, "thanks");
   } finally {

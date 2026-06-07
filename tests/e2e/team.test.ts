@@ -91,14 +91,14 @@ test("routes a config-driven message by subscription over a real socket", async 
     // a 'ruling' aimed at the lead also fans out to its 'ruling' subscribers
     // (fe-writer, be-writer) per their team.yaml subscriptions.
     await client.send({ from: "lead", to: "lead", type: "ruling", parts: [{ kind: "text", text: "ship it" }] });
-    assert.equal((await client.inbox("fe-writer")).length, 1);
-    assert.equal((await client.inbox("be-writer")).length, 1);
-    assert.equal((await client.inbox("lead")).length, 1);
+    assert.equal((await client.peek("fe-writer")).length, 1);
+    assert.equal((await client.peek("be-writer")).length, 1);
+    assert.equal((await client.peek("lead")).length, 1);
     // a reviewer only gets review_request (its subscription), not the ruling
-    assert.equal((await client.inbox("fe-reviewer")).length, 0);
+    assert.equal((await client.peek("fe-reviewer")).length, 0);
 
     await client.send({ from: "fe-writer", to: "fe-reviewer", type: "review_request", parts: [{ kind: "text", text: "PR #1" }] });
-    assert.equal((await client.inbox("fe-reviewer")).length, 1);
+    assert.equal((await client.peek("fe-reviewer")).length, 1);
   } finally {
     await daemon.stop();
   }

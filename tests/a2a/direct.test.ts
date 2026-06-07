@@ -118,7 +118,7 @@ test("the broker observes + logs the direct message without being in the deliver
   // durable log + feed recorded it, and the live inbox reflects it
   assert.match(fs.read(".team/messages.jsonl"), new RegExp(sent.id));
   assert.match(fs.read(".team/feed.md"), /PR #1/);
-  assert.equal(broker.inbox("b").length, 1);
+  assert.equal(broker.peek("b").length, 1);
 });
 
 test("rebuild reconstructs full state purely from the observed JSONL log", async () => {
@@ -135,6 +135,6 @@ test("rebuild reconstructs full state purely from the observed JSONL log", async
   });
   broker2.register(card({ id: "b", role: "reviewer", subscribes: ["review_request"] }));
   broker2.rebuild();
-  assert.equal(broker2.inbox("b").length, 1);
+  assert.equal(broker2.peek("b").length, 1);
   assert.deepEqual(transport2.delivered, []);
 });

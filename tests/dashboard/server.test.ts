@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { DashboardServer } from "../../src/dashboard/server.ts";
-import { MessageBus } from "../../src/broker/bus.ts";
+import { MemoryBus } from "../../src/broker/bus.ts";
 import { JsonlStore } from "../../src/broker/store.ts";
 import { AgentRegistry } from "../../src/broker/registry.ts";
 import { TASK_EVENT_TYPE } from "../../src/broker/tasks.ts";
@@ -32,7 +32,7 @@ function setup() {
   const fs = new MemoryFs();
   const store = new JsonlStore(fs, ".team/messages.jsonl");
   const registry = new AgentRegistry();
-  const bus = new MessageBus();
+  const bus = new MemoryBus();
   const server = new FakeServer();
   registry.register(card("a")); registry.register(card("b", "reviewer"));
   new DashboardServer({ server, store, registry, subscriber: bus }).register();

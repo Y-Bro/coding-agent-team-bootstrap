@@ -9,7 +9,9 @@ import { A2ATransport } from "../src/broker/a2a-transport.ts";
 import { CompositeTransport } from "../src/broker/composite-transport.ts";
 import { CompositeRuntime } from "../src/runtime/composite.ts";
 import { DirectMessenger } from "../src/a2a/direct.ts";
+import { MemoryBus } from "../src/broker/bus.ts";
 import type { TeamConfig } from "../src/config/index.ts";
+import type { AgentCard } from "../src/a2a/index.ts";
 
 const templates = { lead: "# {{id}}", writer: "# {{id}}", reviewer: "# {{id}}" };
 
@@ -83,6 +85,32 @@ test("buildContainer builds the dashboard only when dashboard.enabled (opt-in)",
   const on = buildContainer({ ...base, dashboard: { enabled: true, port: 8123 } }, templates);
   assert.ok(on.dashboard);
   assert.equal(on.dashboard!.port, 8123);
+});
+
+test("buildContainer wires an ALWAYS-ON MemoryBus publisher even with the dashboard off", async () => {
+  const base = loadConfig("tests/config/fixtures/todo.yaml"); // dashboard disabled by default
+  const c = buildContainer(base, templates);
+  assert.equal(c.dashboard, undefined);          // dashboard stays off...
+  assert.ok(c.bus instanceof MemoryBus);          // ...yet the bus is constructed
+
+  // a message recorded by the composed broker reaches an always-on subscriber
+  // (observe records + publishes without touching the real panes transport).
+  const card = (id: string): AgentCard => ({
+    id, role: "writer", cli: "claude", engine: "claude", capabilities: [], skills: [], workdir: ".", subscribes: [],
+  });
+  c.broker.register(card("a")); c.broker.register(card("b"));
+  const seen: string[] = [];
+  c.bus.subscribe((m) => seen.push(m.type));
+  await c.broker.observe({ id: "m1", from: "a", to: "b", type: "note",
+    parts: [{ kind: "text", text: "hi" }], ts: "2026-06-07T00:00:00Z" });
+  assert.deepEqual(seen, ["note"]);
+});
+
+test("buildContainer builds the liveness sweep loop (startable in team up)", () => {
+  const c = buildContainer(loadConfig("tests/config/fixtures/todo.yaml"), templates);
+  assert.ok(c.sweep);
+  assert.equal(typeof c.sweep.start, "function");
+  assert.equal(typeof c.sweep.stop, "function");
 });
 
 test("buildContainer rejects delivery:direct on a MIXED team (>=1 pane agent has no A2A server)", () => {

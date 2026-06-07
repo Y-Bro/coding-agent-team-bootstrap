@@ -15,9 +15,14 @@ import { BrokerAuthProvider, InProcessSecret, bearerHeader } from "./a2a/http/au
 import { randomBytes } from "node:crypto";
 import { throwIfRateLimited } from "./a2a/http/ratelimit.ts";
 import { NodeHttpClient, NodeHttpServer, type TlsClientOptions } from "./ports/http.ts";
-import { MessageBus } from "./broker/bus.ts";
+import { MemoryBus } from "./broker/bus.ts";
+import { TaskMachine } from "./broker/tasks.ts";
+import { TaskProjector } from "./broker/task-projector.ts";
+import { SweepLoop } from "./broker/sweep.ts";
+import { StallPolicy } from "./broker/policies/stall.ts";
+import { DeadLetterPolicy } from "./broker/policies/dead-letter.ts";
 import { DashboardServer } from "./dashboard/server.ts";
-import type { AgentCard } from "./a2a/index.ts";
+import type { AgentCard, Message } from "./a2a/index.ts";
 import { selectRuntime, effectiveRuntime } from "./runtime/select.ts";
 import type { RuntimeKind } from "./runtime/composite.ts";
 import { ServersRuntime, type AgentLink } from "./runtime/servers/servers.ts";
@@ -42,6 +47,13 @@ import { TeamConfigSchema } from "./config/schema.ts";
 import { dirname, join } from "node:path";
 
 type TokenFor = (agentId: string) => string | undefined;
+
+function makeBus(kind: "memory"): MemoryBus {
+  switch (kind) {
+    case "memory": return new MemoryBus();
+    default: throw new Error(`unknown bus.kind: ${kind as string}`);
+  }
+}
 
 /** The recipient's reachable A2A base URL: its advertised card url, else discovery (config). */
 function urlOf(discovery: DiscoveryProvider, recipient: AgentCard): string {
@@ -101,9 +113,9 @@ export function buildContainer(cfg: TeamConfig, templates: Record<string, string
   // (absolute socket under base/.team) keeps its messages/feed/cards together.
   const teamDir = dirname(cfg.broker.socket);
   const store = new JsonlStore(fs, join(teamDir, "messages.jsonl"));
-  // Read-only dashboard (opt-in): a MessageBus fans recorded messages out to the
-  // dashboard's live SSE feed. Absent → broker.publisher stays undefined (no cost).
-  const bus = cfg.dashboard.enabled ? new MessageBus() : undefined;
+  // Observer fan-out is ALWAYS constructed (config-selected) so task projection
+  // and sweep work headless; the dashboard becomes one more subscriber.
+  const bus = makeBus(cfg.bus.kind);
   const makeBroker = (transport: Transport): Broker => new Broker({
     store,
     registry,
@@ -176,6 +188,27 @@ export function buildContainer(cfg: TeamConfig, templates: Record<string, string
 
   const broker = makeBroker(transport);
 
+  // Task projection: derive A2A task state from real traffic by observing the bus
+  // (observer only, never in the delivery path). rebuild() restores state from the
+  // persisted task_status log before live events flow.
+  const taskMachine = new TaskMachine(store, clock, ids);
+  const taskProjector = new TaskProjector(taskMachine);
+  bus.subscribe((m) => taskProjector.handle(m));
+  taskMachine.rebuild();
+
+  // Liveness sweep: one Clock/Sleeper loop, two policies. `emit` appends to the
+  // log AND publishes to the bus so flags/escalations are durable and observable.
+  const emit = (m: Message) => { store.append(m); void bus.publish(m); };
+  const isoOf = (d: Date) => d.toISOString();
+  const lead = cfg.agents[0]!.id; // convention: first agent is the lead/owner of escalations
+  const sweep = new SweepLoop({
+    clock, sleeper: new RealSleeper(), intervalMs: cfg.timers.sweepIntervalMs,
+    policies: [
+      new StallPolicy({ store, stallMs: cfg.timers.stallMs, waker: { wake: (id, s) => runtime.wake(id, s) }, emit, ids, isoOf }),
+      new DeadLetterPolicy({ store, deadLetterMs: cfg.timers.deadLetterMs, lead, emit, ids, isoOf }),
+    ],
+  });
+
   // The servers runtime's link registers spawned agents with THIS broker.
   const makeServersRuntime = needsServers
     ? () => new ServersRuntime({
@@ -209,13 +242,15 @@ export function buildContainer(cfg: TeamConfig, templates: Record<string, string
 
   // Opt-in read-only dashboard, served from the broker process on its own port.
   let dashboard: { server: DashboardServer; port: number } | undefined;
-  if (bus) {
+  if (cfg.dashboard.enabled) {
     const server = new DashboardServer({ server: new NodeHttpServer(), store, registry, subscriber: bus });
     server.register();
     dashboard = { server, port: cfg.dashboard.port };
   }
 
-  return { broker, daemon, bootstrapper, runtime, transport, messenger, dashboard };
+  // `bus` is exposed from the composition root so the always-on observer seam is
+  // assertable (it is constructed regardless of dashboard.enabled).
+  return { broker, daemon, bootstrapper, runtime, transport, messenger, dashboard, taskMachine, bus, sweep };
 }
 
 /** Compose the `team doctor` collaborators: probe core tools + every known engine command. */

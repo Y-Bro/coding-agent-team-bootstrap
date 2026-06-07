@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { DEFAULT_MESSAGE_TYPES } from "../a2a/index.ts";
+import { BUILTIN_ENGINES } from "../engines/registry.ts";
 
 const Worktree = z.object({ branch: z.string(), path: z.string() });
 
@@ -15,7 +16,7 @@ const Agent = z
   .object({
     id: z.string().min(1),
     role: z.string().min(1),
-    cli: z.enum(["claude", "codex"]).default("claude"),
+    cli: z.string().min(1).default("claude"),
     engine: z.string().optional(),
     workdir: z.string().default("."),
     worktree: Worktree.optional(),
@@ -102,6 +103,18 @@ const Dashboard = z
   })
   .default({});
 
+/** Observer fan-out backend. Only the in-process MemoryBus ships in v3.1; the
+ * field is the seam for a future network pub/sub (Kafka, Google Pub/Sub). */
+const Bus = z.object({ kind: z.enum(["memory"]).default("memory") }).default({});
+
+/** Liveness timers (v3.1-m4): a Clock-driven sweep re-nudges stalled tasks and
+ * dead-letters unanswered review requests. All in milliseconds. */
+const Timers = z.object({
+  stallMs: z.number().int().positive().default(600_000),        // working > 10 min → re-nudge owner
+  deadLetterMs: z.number().int().positive().default(1_800_000), // review_request unanswered > 30 min → escalate
+  sweepIntervalMs: z.number().int().positive().default(30_000), // sweep cadence
+}).default({});
+
 export const TeamConfigSchema = z.object({
   name: z.string().min(1),
   root: z.string().default("."),
@@ -112,6 +125,8 @@ export const TeamConfigSchema = z.object({
   broker: Broker,
   servers: Servers,
   dashboard: Dashboard,
+  bus: Bus,
+  timers: Timers,
   engines: z.record(EngineProfileSchema).optional(),
   agents: z.array(Agent).min(1),
   windows: z.array(z.string()).default([]),
@@ -126,6 +141,19 @@ export const TeamConfigSchema = z.object({
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: `duplicate agent id: ${a.id}` });
     }
     seen.add(a.id);
+  }
+  // Accept any engine the registry can resolve: a builtin or a config-defined one.
+  const names = new Set<string>([
+    ...BUILTIN_ENGINES.map((e) => e.name),
+    ...Object.keys(cfg.engines ?? {}),
+  ]);
+  for (const a of cfg.agents) {
+    if (!names.has(a.engine)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `unknown engine "${a.engine}" for agent ${a.id}; valid: ${[...names].join(", ")}`,
+      });
+    }
   }
 });
 

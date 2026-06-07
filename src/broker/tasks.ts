@@ -54,12 +54,22 @@ export function projectTasks(messages: Iterable<Message>): Task[] {
 }
 
 /**
+ * Narrow task-lifecycle seam the {@link TaskProjector} depends on: create-if-absent
+ * and state transition only. Lets the projector observe traffic without depending on
+ * the concrete {@link TaskMachine} (store/clock/ids). Satisfied by {@link TaskMachine}.
+ */
+export interface TaskLifecycle {
+  ensure(id: string, input: { title: string; owner: string }): Task;
+  transition(taskId: string, to: TaskState): Task;
+}
+
+/**
  * The A2A Task lifecycle, persisted over the existing v1 {@link MessageStore}:
  * every create/transition is appended as a `task_status` message, so replaying
  * the log reconstructs task state (rebuild-from-log preserved). Illegal
  * transitions are rejected; terminal states accept none.
  */
-export class TaskMachine {
+export class TaskMachine implements TaskLifecycle {
   private tasks = new Map<string, Task>();
 
   constructor(private store: MessageStore, private clock: Clock, private ids: IdGenerator) {}
@@ -73,10 +83,21 @@ export class TaskMachine {
     return task;
   }
 
+  /** Create a task with a caller-supplied id in `submitted` if absent; else no-op. */
+  ensure(id: string, input: { title: string; owner: string }): Task {
+    const existing = this.tasks.get(id);
+    if (existing) return existing;
+    const task: Task = { id, title: input.title, state: "submitted", owner: input.owner, history: [], artifacts: [] };
+    this.tasks.set(id, task);
+    this.record({ taskId: id, state: "submitted", title: input.title, owner: input.owner });
+    return task;
+  }
+
   /** Move a task to a new state, rejecting illegal transitions; persists the event. */
   transition(taskId: string, to: TaskState): Task {
     const task = this.tasks.get(taskId);
     if (!task) throw new Error(`unknown task: ${taskId}`);
+    if (task.state === to) return task; // idempotent: re-applying the same state is a no-op
     if (!LEGAL_TRANSITIONS[task.state].includes(to)) {
       throw new Error(`illegal task transition: ${task.state} -> ${to}`);
     }

@@ -24,6 +24,7 @@ test("agent.engine defaults from cli when engine omitted", () => {
 test("explicit agent.engine wins over cli", () => {
   const cfg = TeamConfigSchema.parse({
     name: "t",
+    engines: { x: { command: "x", roleFile: "AGENTS.md" } },
     agents: [{ id: "lead", role: "lead", cli: "codex", engine: "x" }],
   });
   assert.equal(cfg.agents[0]!.engine, "x");
@@ -173,6 +174,7 @@ test("servers block defaults: auth on, base port, and rate-limit knobs", () => {
   const cfg = TeamConfigSchema.parse({
     name: "t",
     runtime: "servers",
+    engines: { srv: { command: "srv", roleFile: "AGENTS.md", kind: "server" } },
     agents: [{ id: "a", role: "writer", engine: "srv" }],
   });
   assert.equal(cfg.servers.host, "127.0.0.1");
@@ -187,6 +189,7 @@ test("servers block honors explicit rate-limit + auth overrides", () => {
   const cfg = TeamConfigSchema.parse({
     name: "t",
     runtime: "servers",
+    engines: { srv: { command: "srv", roleFile: "AGENTS.md", kind: "server" } },
     servers: { basePort: 50000, auth: false, rateLimit: { maxConcurrency: 1, bucketCapacity: 2, refillPerSec: 0.5 } },
     agents: [{ id: "a", role: "writer", engine: "srv" }],
   });
@@ -200,6 +203,7 @@ test("an agent may override its A2A port", () => {
   const cfg = TeamConfigSchema.parse({
     name: "t",
     runtime: "servers",
+    engines: { srv: { command: "srv", roleFile: "AGENTS.md", kind: "server" } },
     agents: [{ id: "a", role: "writer", engine: "srv", port: 42042 }],
   });
   assert.equal(cfg.agents[0]!.port, 42042);

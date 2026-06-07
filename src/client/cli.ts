@@ -2,7 +2,8 @@ import { Command } from "commander";
 
 export interface ClientLike {
   send(p: { from: string; to: string; type: string; parts: { kind: "text"; text: string }[]; task?: string }): Promise<unknown>;
-  inbox(agentId: string): Promise<any[]>;
+  peek(agentId: string): Promise<any[]>;
+  ack(agentId: string, ids: string[]): Promise<void>;
   list(): Promise<any[]>;
 }
 
@@ -22,12 +23,14 @@ export function buildProgram(client: ClientLike, agentId: string, print: (s: str
     });
 
   program.command("inbox").action(async () => {
-    const msgs = await client.inbox(agentId);
+    const msgs = await client.peek(agentId);
     if (msgs.length === 0) { print("(empty)"); return; }
     for (const m of msgs) {
       const text = m.parts.map((p: any) => (p.kind === "text" ? p.text : `[${p.kind}]`)).join(" ");
       print(`${m.from} ${m.type}: ${text}`);
     }
+    // at-least-once: ack only after the messages have been printed (consumed).
+    await client.ack(agentId, msgs.map((m) => m.id));
   });
 
   program.command("ps").action(async () => {

@@ -38,7 +38,7 @@ test("end-to-end: register two agents, send over the socket, recipient drains it
   try {
     const client = new BrokerClient(new NodeSocketClient(), sock);
     await client.send({ from: "a", to: "b", type: "review_request", parts: [{ kind: "text", text: "slice 4" }] });
-    const inbox = (await client.inbox("b")) as any[];
+    const inbox = (await client.peek("b")) as any[];
     assert.equal(inbox.length, 1);
     assert.equal(inbox[0].type, "review_request");
   } finally {
