@@ -54,12 +54,22 @@ export function projectTasks(messages: Iterable<Message>): Task[] {
 }
 
 /**
+ * Narrow task-lifecycle seam the {@link TaskProjector} depends on: create-if-absent
+ * and state transition only. Lets the projector observe traffic without depending on
+ * the concrete {@link TaskMachine} (store/clock/ids). Satisfied by {@link TaskMachine}.
+ */
+export interface TaskLifecycle {
+  ensure(id: string, input: { title: string; owner: string }): Task;
+  transition(taskId: string, to: TaskState): Task;
+}
+
+/**
  * The A2A Task lifecycle, persisted over the existing v1 {@link MessageStore}:
  * every create/transition is appended as a `task_status` message, so replaying
  * the log reconstructs task state (rebuild-from-log preserved). Illegal
  * transitions are rejected; terminal states accept none.
  */
-export class TaskMachine {
+export class TaskMachine implements TaskLifecycle {
   private tasks = new Map<string, Task>();
 
   constructor(private store: MessageStore, private clock: Clock, private ids: IdGenerator) {}

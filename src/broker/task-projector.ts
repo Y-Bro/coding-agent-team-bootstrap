@@ -1,5 +1,5 @@
 import type { Message, TaskState } from "../a2a/index.ts";
-import type { TaskMachine } from "./tasks.ts";
+import type { TaskLifecycle } from "./tasks.ts";
 
 /** Message type → task state. Only these types affect task lifecycle; everything
  * else (including the projector's own `task_status` output) is ignored. */
@@ -23,7 +23,7 @@ function titleOf(m: Message): string {
  * messages (idempotent + try/catch), satisfying the bus adapter contract.
  */
 export class TaskProjector {
-  constructor(private machine: TaskMachine) {}
+  constructor(private machine: TaskLifecycle) {}
 
   handle(m: Message): void {
     if (!m.task) return;
