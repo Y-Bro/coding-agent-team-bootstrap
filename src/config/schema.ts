@@ -106,6 +106,14 @@ const Dashboard = z
  * field is the seam for a future network pub/sub (Kafka, Google Pub/Sub). */
 const Bus = z.object({ kind: z.enum(["memory"]).default("memory") }).default({});
 
+/** Liveness timers (v3.1-m4): a Clock-driven sweep re-nudges stalled tasks and
+ * dead-letters unanswered review requests. All in milliseconds. */
+const Timers = z.object({
+  stallMs: z.number().int().positive().default(600_000),        // working > 10 min → re-nudge owner
+  deadLetterMs: z.number().int().positive().default(1_800_000), // review_request unanswered > 30 min → escalate
+  sweepIntervalMs: z.number().int().positive().default(30_000), // sweep cadence
+}).default({});
+
 export const TeamConfigSchema = z.object({
   name: z.string().min(1),
   root: z.string().default("."),
@@ -117,6 +125,7 @@ export const TeamConfigSchema = z.object({
   servers: Servers,
   dashboard: Dashboard,
   bus: Bus,
+  timers: Timers,
   engines: z.record(EngineProfileSchema).optional(),
   agents: z.array(Agent).min(1),
   windows: z.array(z.string()).default([]),
