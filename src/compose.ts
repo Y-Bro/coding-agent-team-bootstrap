@@ -232,7 +232,9 @@ export function buildContainer(cfg: TeamConfig, templates: Record<string, string
     dashboard = { server, port: cfg.dashboard.port };
   }
 
-  return { broker, daemon, bootstrapper, runtime, transport, messenger, dashboard, taskMachine };
+  // `bus` is exposed from the composition root so the always-on observer seam is
+  // assertable (it is constructed regardless of dashboard.enabled).
+  return { broker, daemon, bootstrapper, runtime, transport, messenger, dashboard, taskMachine, bus };
 }
 
 /** Compose the `team doctor` collaborators: probe core tools + every known engine command. */
