@@ -18,8 +18,11 @@ import { NodeHttpClient, NodeHttpServer, type TlsClientOptions } from "./ports/h
 import { MemoryBus } from "./broker/bus.ts";
 import { TaskMachine } from "./broker/tasks.ts";
 import { TaskProjector } from "./broker/task-projector.ts";
+import { SweepLoop } from "./broker/sweep.ts";
+import { StallPolicy } from "./broker/policies/stall.ts";
+import { DeadLetterPolicy } from "./broker/policies/dead-letter.ts";
 import { DashboardServer } from "./dashboard/server.ts";
-import type { AgentCard } from "./a2a/index.ts";
+import type { AgentCard, Message } from "./a2a/index.ts";
 import { selectRuntime, effectiveRuntime } from "./runtime/select.ts";
 import type { RuntimeKind } from "./runtime/composite.ts";
 import { ServersRuntime, type AgentLink } from "./runtime/servers/servers.ts";
@@ -193,6 +196,19 @@ export function buildContainer(cfg: TeamConfig, templates: Record<string, string
   bus.subscribe((m) => taskProjector.handle(m));
   taskMachine.rebuild();
 
+  // Liveness sweep: one Clock/Sleeper loop, two policies. `emit` appends to the
+  // log AND publishes to the bus so flags/escalations are durable and observable.
+  const emit = (m: Message) => { store.append(m); void bus.publish(m); };
+  const isoOf = (d: Date) => d.toISOString();
+  const lead = cfg.agents[0]!.id; // convention: first agent is the lead/owner of escalations
+  const sweep = new SweepLoop({
+    clock, sleeper: new RealSleeper(), intervalMs: cfg.timers.sweepIntervalMs,
+    policies: [
+      new StallPolicy({ store, stallMs: cfg.timers.stallMs, waker: { wake: (id, s) => runtime.wake(id, s) }, emit, ids, isoOf }),
+      new DeadLetterPolicy({ store, deadLetterMs: cfg.timers.deadLetterMs, lead, emit, ids, isoOf }),
+    ],
+  });
+
   // The servers runtime's link registers spawned agents with THIS broker.
   const makeServersRuntime = needsServers
     ? () => new ServersRuntime({
@@ -234,7 +250,7 @@ export function buildContainer(cfg: TeamConfig, templates: Record<string, string
 
   // `bus` is exposed from the composition root so the always-on observer seam is
   // assertable (it is constructed regardless of dashboard.enabled).
-  return { broker, daemon, bootstrapper, runtime, transport, messenger, dashboard, taskMachine, bus };
+  return { broker, daemon, bootstrapper, runtime, transport, messenger, dashboard, taskMachine, bus, sweep };
 }
 
 /** Compose the `team doctor` collaborators: probe core tools + every known engine command. */

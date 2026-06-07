@@ -106,6 +106,13 @@ test("buildContainer wires an ALWAYS-ON MemoryBus publisher even with the dashbo
   assert.deepEqual(seen, ["note"]);
 });
 
+test("buildContainer builds the liveness sweep loop (startable in team up)", () => {
+  const c = buildContainer(loadConfig("tests/config/fixtures/todo.yaml"), templates);
+  assert.ok(c.sweep);
+  assert.equal(typeof c.sweep.start, "function");
+  assert.equal(typeof c.sweep.stop, "function");
+});
+
 test("buildContainer rejects delivery:direct on a MIXED team (>=1 pane agent has no A2A server)", () => {
   // preserves the v3-m1 invariant: direct delivery requires every agent on servers
   const cfg = { ...mixedConfig(), delivery: "direct" as const };

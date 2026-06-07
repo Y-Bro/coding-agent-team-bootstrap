@@ -85,9 +85,12 @@ if (process.argv[2] === "up" || process.argv[2] === "down") {
     }
     const { BrokerAlreadyRunningError } = await import("../src/ports/transport.ts");
     try {
-      const { daemon, bootstrapper, dashboard } = buildContainer(cfg, templates);
+      const { daemon, bootstrapper, dashboard, sweep } = buildContainer(cfg, templates);
       await teamUp(daemon, bootstrapper, socketPath, { fs, proc, pidfile, socket: socketPath });
       console.log(`team up: ${cfg.name} — ${cfg.agents.length} agents on ${socketPath} (Ctrl-C or \`team down\` to stop)`);
+      // Liveness sweep runs alongside the broker; stop it on clean shutdown.
+      void sweep.start();
+      proc.onShutdown(() => sweep.stop());
       if (dashboard) {
         await dashboard.server.listen(dashboard.port);
         console.log(`dashboard (read-only): http://${cfg.servers.host}:${dashboard.port}`);
