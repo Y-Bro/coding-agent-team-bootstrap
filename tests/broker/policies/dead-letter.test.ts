@@ -37,6 +37,38 @@ test("does not escalate an answered review_request", () => {
   assert.equal(sent.length, 0);
 });
 
+test("escalates a NEWER unanswered review_request even if an OLD answer exists on the same task", () => {
+  const s = store();
+  // an old answer (e.g. a prior review cycle) precedes the new request
+  s.append({ id: "m0", task: "t-1", from: "reviewer", to: "writer", type: "approval",
+    parts: [{ kind: "text", text: "ok (old cycle)" }], ts: "2026-06-07T00:00:00.000Z" });
+  s.append(rr("m1", "t-1", "2026-06-07T00:10:00.000Z")); // newer request, unanswered
+  const sent: Message[] = [];
+  const policy = new DeadLetterPolicy({ store: s, deadLetterMs: 1_800_000, lead: "lead",
+    emit: (m) => sent.push(m), ids: new SeqIds(), isoOf: (d) => d.toISOString() });
+  policy.run(new Date("2026-06-07T00:45:00.000Z")); // 35 min after the request
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0]!.type, "escalation");
+});
+
+test("does not emit a DUPLICATE escalation after a restart (durable once-marker in the log)", () => {
+  const s = store();
+  s.append(rr("m1", "t-1", "2026-06-07T00:00:00.000Z"));
+  // first run persists the escalation to the SAME log (compose's emit = append+publish)
+  const sent1: Message[] = [];
+  const p1 = new DeadLetterPolicy({ store: s, deadLetterMs: 1_800_000, lead: "lead",
+    emit: (m) => { s.append(m); sent1.push(m); }, ids: new SeqIds(), isoOf: (d) => d.toISOString() });
+  p1.run(new Date("2026-06-07T00:31:00.000Z"));
+  assert.equal(sent1.length, 1);
+
+  // a fresh policy (broker restart) replays the same log — must NOT re-escalate
+  const sent2: Message[] = [];
+  const p2 = new DeadLetterPolicy({ store: s, deadLetterMs: 1_800_000, lead: "lead",
+    emit: (m) => { s.append(m); sent2.push(m); }, ids: new SeqIds(), isoOf: (d) => d.toISOString() });
+  p2.run(new Date("2026-06-07T00:40:00.000Z"));
+  assert.equal(sent2.length, 0);
+});
+
 test("does not escalate before deadLetterMs", () => {
   const s = store();
   s.append(rr("m1", "t-1", "2026-06-07T00:00:00.000Z"));
