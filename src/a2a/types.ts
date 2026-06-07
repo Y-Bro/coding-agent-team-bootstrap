@@ -1,4 +1,6 @@
-export type Cli = "claude" | "codex";
+/** Engine selector: any registry-resolved engine name (builtin or config-defined).
+ * Validated against the resolved engine set in the team config superRefine. */
+export type Cli = string;
 
 export interface AgentCard {
   id: string;

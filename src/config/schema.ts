@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { DEFAULT_MESSAGE_TYPES } from "../a2a/index.ts";
+import { BUILTIN_ENGINES } from "../engines/registry.ts";
 
 const Worktree = z.object({ branch: z.string(), path: z.string() });
 
@@ -15,7 +16,7 @@ const Agent = z
   .object({
     id: z.string().min(1),
     role: z.string().min(1),
-    cli: z.enum(["claude", "codex"]).default("claude"),
+    cli: z.string().min(1).default("claude"),
     engine: z.string().optional(),
     workdir: z.string().default("."),
     worktree: Worktree.optional(),
@@ -140,6 +141,19 @@ export const TeamConfigSchema = z.object({
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: `duplicate agent id: ${a.id}` });
     }
     seen.add(a.id);
+  }
+  // Accept any engine the registry can resolve: a builtin or a config-defined one.
+  const names = new Set<string>([
+    ...BUILTIN_ENGINES.map((e) => e.name),
+    ...Object.keys(cfg.engines ?? {}),
+  ]);
+  for (const a of cfg.agents) {
+    if (!names.has(a.engine)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `unknown engine "${a.engine}" for agent ${a.id}; valid: ${[...names].join(", ")}`,
+      });
+    }
   }
 });
 
