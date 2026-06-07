@@ -107,7 +107,7 @@ export class Broker implements BrokerDispatch, MessageObserver {
     this.deps.store.append(m);
     this.deps.feed.append(m);
     for (const id of recipients) this.deliver(id, m);
-    this.deps.publisher?.publish(m); // notify the read-only dashboard, if attached
+    void this.deps.publisher?.publish(m); // notify observers (dashboard/projector/sweep) — fire-and-forget so record() stays sync
   }
 
   private deliver(id: string, m: Message): void {
