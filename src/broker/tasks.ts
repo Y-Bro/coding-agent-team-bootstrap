@@ -73,10 +73,21 @@ export class TaskMachine {
     return task;
   }
 
+  /** Create a task with a caller-supplied id in `submitted` if absent; else no-op. */
+  ensure(id: string, input: { title: string; owner: string }): Task {
+    const existing = this.tasks.get(id);
+    if (existing) return existing;
+    const task: Task = { id, title: input.title, state: "submitted", owner: input.owner, history: [], artifacts: [] };
+    this.tasks.set(id, task);
+    this.record({ taskId: id, state: "submitted", title: input.title, owner: input.owner });
+    return task;
+  }
+
   /** Move a task to a new state, rejecting illegal transitions; persists the event. */
   transition(taskId: string, to: TaskState): Task {
     const task = this.tasks.get(taskId);
     if (!task) throw new Error(`unknown task: ${taskId}`);
+    if (task.state === to) return task; // idempotent: re-applying the same state is a no-op
     if (!LEGAL_TRANSITIONS[task.state].includes(to)) {
       throw new Error(`illegal task transition: ${task.state} -> ${to}`);
     }

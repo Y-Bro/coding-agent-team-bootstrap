@@ -70,6 +70,31 @@ test("transition on an unknown task throws", () => {
   assert.throws(() => m.transition("nope", "working"), /unknown task/);
 });
 
+test("ensure creates a task with the given id once, idempotently", () => {
+  const { m } = machine();
+  const a = m.ensure("t-1", { title: "T", owner: "writer" });
+  const b = m.ensure("t-1", { title: "OTHER", owner: "x" });
+  assert.equal(a.id, "t-1");
+  assert.equal(b.title, "T");                    // second ensure is a no-op
+  assert.equal(m.all().length, 1);
+});
+
+test("transition to the current state is an idempotent no-op (no throw)", () => {
+  const { m } = machine();
+  m.ensure("t-1", { title: "T", owner: "w" });
+  m.transition("t-1", "working");
+  const again = m.transition("t-1", "working");  // same state
+  assert.equal(again.state, "working");
+});
+
+test("genuinely illegal transition still throws", () => {
+  const { m } = machine();
+  m.ensure("t-1", { title: "T", owner: "w" });
+  m.transition("t-1", "working");
+  m.transition("t-1", "completed");
+  assert.throws(() => m.transition("t-1", "working")); // completed is terminal
+});
+
 test("replay reconstructs task state from the persisted log", () => {
   const { store, m } = machine();
   const t = m.create({ title: "ship", owner: "lead" });
