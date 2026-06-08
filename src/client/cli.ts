@@ -1,4 +1,5 @@
 import { Command } from "commander";
+import { trace } from "../obs/trace.ts";
 
 export interface ClientLike {
   send(p: { from: string; to: string; type: string; parts: { kind: "text"; text: string }[]; task?: string }): Promise<unknown>;
@@ -18,11 +19,13 @@ export function buildProgram(client: ClientLike, agentId: string, print: (s: str
     .option("--task <id>")
     .argument("<body>")
     .action(async (body: string, opts: { to: string; type: string; task?: string }) => {
+      trace("cli", `send: from=${agentId} to=${opts.to} type=${opts.type}${opts.task ? ` task=${opts.task}` : ""}`);
       await client.send({ from: agentId, to: opts.to, type: opts.type, task: opts.task, parts: [{ kind: "text", text: body }] });
       print(`sent ${opts.type} → ${opts.to}`);
     });
 
   program.command("inbox").action(async () => {
+    trace("cli", `inbox: peek for ${agentId} → print → ack`);
     const msgs = await client.peek(agentId);
     if (msgs.length === 0) { print("(empty)"); return; }
     for (const m of msgs) {
@@ -34,6 +37,7 @@ export function buildProgram(client: ClientLike, agentId: string, print: (s: str
   });
 
   program.command("ps").action(async () => {
+    trace("cli", "ps: list roster");
     for (const a of await client.list()) print(`${a.id}\t${a.role}`);
   });
 

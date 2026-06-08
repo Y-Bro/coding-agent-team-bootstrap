@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import type { FileSystem } from "../ports/fs.ts";
 import type { EngineRegistry } from "../engines/index.ts";
 import type { GuidanceGenerator } from "../ports/guidance.ts";
+import { trace } from "../obs/trace.ts";
 
 /** Hard cap on every generated context file (guidance + blank + footer). */
 const MAX_MD_LINES = 200;
@@ -94,6 +95,7 @@ export class ContextScaffolder {
   ) {}
 
   async scaffold(team: string, agents: ScaffoldAgent[], base: string): Promise<void> {
+    trace("scaffolder", `writing context files for ${agents.length} agents under ${base}`);
     for (const a of agents) {
       const profile = this.engines.get(a.engine);
       const roleFile = profile?.roleFile ?? "CONTEXT.md";
@@ -103,15 +105,18 @@ export class ContextScaffolder {
       const target = resolve(base, dir, roleFile);
 
       if (this.fs.exists(target)) {
+        trace("scaffolder", `${a.id}: ${target} exists → skip`);
         this.warn(`context file exists, skipping: ${target}`);
         continue;
       }
       const footer = buildWiringFooter(team, a, agents);
       const text = await this.guidance.generate({ role: a.role, id: a.id, team, engine: a.engine });
       if (text === null) {
+        trace("scaffolder", `${a.id}: guidance null → wiring-only ${target}`);
         this.warn(`guidance unavailable for ${a.id}; wrote wiring-only ${target}`);
         this.fs.write(target, footer);
       } else {
+        trace("scaffolder", `${a.id}: guidance + footer → ${target}`);
         // Trim the guidance so guidance + blank separator + footer stays within
         // the 200-line cap; the wiring footer is always preserved intact.
         const footerLines = footer.split("\n").length;

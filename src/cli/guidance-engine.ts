@@ -1,6 +1,7 @@
 import type { CommandRunner } from "../ports/command.ts";
 import type { EngineRegistry } from "../engines/index.ts";
 import type { GuidanceGenerator, GuidanceRequest } from "../ports/guidance.ts";
+import { trace } from "../obs/trace.ts";
 
 const TIMEOUT_MS = 120_000;
 
@@ -25,11 +26,19 @@ export class EngineGuidanceGenerator implements GuidanceGenerator {
 
   async generate(req: GuidanceRequest): Promise<string | null> {
     const profile = this.engines.get(this.generatorEngine);
-    if (!profile?.headlessArgs) return null;
+    if (!profile?.headlessArgs) {
+      trace("guidance", `engine '${this.generatorEngine}' has no headlessArgs → null (caller falls back to wiring-only)`);
+      return null;
+    }
     const args = [...(profile.args ?? []), ...profile.headlessArgs, buildGuidancePrompt(req)];
+    trace("guidance", `spawn ${profile.command} (timeout=${TIMEOUT_MS}ms) for ${req.id}/${req.role}`);
     const res = await this.runner.run(profile.command, args, { timeoutMs: TIMEOUT_MS });
-    if (res.timedOut || res.code !== 0) return null;
+    if (res.timedOut || res.code !== 0) {
+      trace("guidance", `${req.id}: ${res.timedOut ? "timed out" : `exit ${res.code}`} → null`);
+      return null;
+    }
     const out = res.stdout.trim();
+    trace("guidance", `${req.id}: ${out.length} chars guidance`);
     return out.length > 0 ? out : null;
   }
 }
