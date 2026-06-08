@@ -36,14 +36,22 @@ if (process.argv[2] === "new") {
   const rest = process.argv.slice(3);
   const yes = rest.includes("--yes");
   const noGuidance = rest.includes("--no-guidance");
+  const force = rest.includes("--force");
   const outIdx = rest.indexOf("--out");
   const out = outIdx >= 0 && rest[outIdx + 1] ? rest[outIdx + 1]! : "team.yaml";
+  // --yes keeps an existing config: no clobber, no prompt (the headless --yes
+  // script has no overwrite answer, so short-circuit here unless --force).
+  const { existsSync } = await import("node:fs");
+  if (yes && existsSync(out) && !force) {
+    console.log(`Kept existing ${out} (use --force to overwrite).`);
+    process.exit(0);
+  }
   // --yes: drive a solo/panes default headlessly (name, runtime=1, preset=1=solo,
   // engine, window(agent)=agent, confirm=n). Mirrors `team init --yes`.
   const deps = yes
     ? { prompter: new ScriptedPrompter(["team", "1", "1", "claude", "agent", "n"]) }
     : {};
-  await runScaffoldCommand({ out, noGuidance }, deps);
+  await runScaffoldCommand({ out, noGuidance, force }, deps);
   console.log(`Wrote ${out}`);
   process.exit(0);
 }

@@ -319,6 +319,8 @@ export async function runInitCommand(
 export interface ScaffoldOptions {
   out: string;
   noGuidance?: boolean;
+  /** Overwrite an existing config unconditionally (skips the overwrite prompt). */
+  force?: boolean;
 }
 
 interface ScaffoldDeps {
@@ -346,6 +348,20 @@ export async function runScaffoldCommand(opts: ScaffoldOptions, deps: ScaffoldDe
 
   const prompter = deps.prompter ?? new NodePrompter();
   const runner = deps.runner ?? new NodeCommandRunner();
+  const fs = new NodeFileSystem();
+
+  // Overwrite guard: never clobber an existing config silently. --force overwrites
+  // unconditionally; otherwise prompt (default NO) and on "no" abort the whole
+  // scaffold — write nothing and skip context files. (`team new --yes` keeps an
+  // existing config by short-circuiting in bin before we get here.)
+  if (fs.exists(opts.out) && !opts.force) {
+    const overwrite = await prompter.confirm(`${opts.out} already exists — overwrite it?`, false);
+    if (!overwrite) {
+      if (prompter instanceof NodePrompter) prompter.close();
+      console.log(`Kept existing ${opts.out}; nothing written.`);
+      return { out: opts.out };
+    }
+  }
 
   // Interactive: offer only engines on PATH (+ a guaranteed first choice).
   // Headless (injected prompter): offer every repl engine so scripted answers work.
@@ -386,7 +402,7 @@ export async function runScaffoldCommand(opts: ScaffoldOptions, deps: ScaffoldDe
   const scaffoldAgents: ScaffoldAgent[] = wiz.agents.map((a) => ({
     id: a.id, role: a.role, engine: a.engine, subscribes: [],
   }));
-  await new ContextScaffolder(new NodeFileSystem(), generator, engines, (m) => console.warn(m))
+  await new ContextScaffolder(fs, generator, engines, (m) => console.warn(m))
     .scaffold(wiz.name, scaffoldAgents, base);
 
   // 5) optional bring-up
