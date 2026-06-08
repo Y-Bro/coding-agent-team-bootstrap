@@ -1,12 +1,14 @@
 import { type SocketServer, BrokerAlreadyRunningError } from "../ports/transport.ts";
 import type { BrokerDispatch } from "./broker.ts";
 import type { Request, Response } from "./protocol.ts";
+import { trace } from "../obs/trace.ts";
 
 /** Bridges the socket transport to the broker dispatch surface. Pure dispatch, injectable server. */
 export class BrokerDaemon {
   constructor(private broker: BrokerDispatch, private server: SocketServer) {}
 
   async start(socketPath: string): Promise<void> {
+    trace("daemon", `listen on unix socket ${socketPath}`);
     try {
       await this.server.listen(socketPath, (raw, reply) => {
         void this.handle(raw as Request).then(reply);
@@ -20,10 +22,12 @@ export class BrokerDaemon {
   }
 
   async stop(): Promise<void> {
+    trace("daemon", "close socket server");
     await this.server.close();
   }
 
   private async handle(req: Request): Promise<Response> {
+    trace("daemon", `rpc dispatch method=${req.method}`);
     try {
       switch (req.method) {
         case "agent/register":

@@ -2,6 +2,7 @@ import type { SocketClient } from "../ports/transport.ts";
 import type { Response } from "../broker/protocol.ts";
 import type { MessageObserver } from "../broker/broker.ts";
 import type { AgentCard, Message, Part } from "../a2a/index.ts";
+import { trace } from "../obs/trace.ts";
 
 /**
  * Socket client for the broker RPC. Implements {@link MessageObserver} so a
@@ -12,13 +13,14 @@ export class BrokerClient implements MessageObserver {
   constructor(private transport: SocketClient, private socketPath: string) {}
 
   private async call(method: string, params: unknown): Promise<unknown> {
+    trace("rpc", `call ${method} → socket ${this.socketPath}`);
     let res: Response;
     try {
       res = (await this.transport.request(this.socketPath, { method, params })) as Response;
     } catch {
       throw new Error("broker down — run `team up`");
     }
-    if (!res.ok) throw new Error(res.error);
+    if (!res.ok) { trace("rpc", `${method} error: ${res.error}`); throw new Error(res.error); }
     return res.result;
   }
 
