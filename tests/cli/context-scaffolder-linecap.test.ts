@@ -28,5 +28,5 @@ test("written markdown never exceeds 200 lines", async () => {
   const lineCount = content.split("\n").length;
   assert.ok(lineCount <= 200, `expected <=200 lines, got ${lineCount}`);
   // footer must survive the cap
-  assert.match(content, /## Team wiring/);
+  assert.match(content, /## How to communicate/);
 });

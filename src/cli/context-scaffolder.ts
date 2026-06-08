@@ -15,21 +15,65 @@ export interface ScaffoldAgent {
   worktree?: { branch: string; path: string };
 }
 
-/** Deterministic team-wiring block, derived purely from config. */
+/** One-line meaning per message type (the protocol vocabulary). */
+const MESSAGE_TYPE_HELP: ReadonlyArray<readonly [string, string]> = [
+  ["task_assignment", "assign a unit of work to a teammate"],
+  ["status", "progress update on current work"],
+  ["review_request", "ask a teammate to review your work"],
+  ["review_comment", "feedback on something under review"],
+  ["approval", "sign off that work is acceptable"],
+  ["ruling", "a decision that resolves a question or dispute"],
+  ["escalation", "raise a blocker or issue to the orchestrator"],
+  ["note", "general FYI that needs no action"],
+];
+
+/**
+ * Deterministic "How to communicate" block, derived purely from config: identity,
+ * teammates, subscriptions, the hub-and-spoke topology (orchestrator = `all[0]`),
+ * the broker commands, the message-type vocabulary, and two role-fit examples.
+ * Compact by design (~35 lines) — stays well within the 200-line context cap.
+ */
 export function buildWiringFooter(team: string, self: ScaffoldAgent, all: ScaffoldAgent[]): string {
   const teammates = all.filter((a) => a.id !== self.id)
     .map((a) => `${a.id} (${a.role})`).join(", ") || "(none)";
   const subs = (self.subscribes ?? []).join(", ") || "(none)";
-  const anyTeammate = all.find((a) => a.id !== self.id)?.id ?? "lead";
+  const orchestrator = all[0]?.id ?? self.id;
+  const isHub = self.id === orchestrator;
+  const someTeammate = all.find((a) => a.id !== self.id)?.id ?? "<teammate>";
+
+  const topology = isHub
+    ? `- You ARE the orchestrator: you hear every message type and may address any teammate directly by id.`
+    : `- Send your messages to the orchestrator **${orchestrator}**; team-wide traffic flows through the orchestrator.`;
+
+  const examples = isHub
+    ? [
+        `- Assign work:   \`team send --to ${someTeammate} --type task_assignment --text "..."\``,
+        `- Make a ruling: \`team send --to ${someTeammate} --type ruling --text "..."\``,
+      ]
+    : [
+        `- Report status:   \`team send --to ${orchestrator} --type status --text "..."\``,
+        `- Raise a blocker: \`team send --to ${orchestrator} --type escalation --text "..."\``,
+      ];
+
   return [
-    `## Team wiring`,
+    `## How to communicate`,
     ``,
     `- You are **${self.id}** (role: ${self.role}) on team **${team}**.`,
     `- Teammates: ${teammates}.`,
     `- You receive messages of type: ${subs}.`,
     ``,
-    `Read your mail:  \`team inbox ${self.id}\``,
-    `Reply / send:    \`team send --to ${anyTeammate} --type status --text "..."\``,
+    `Topology — hub-and-spoke through **${orchestrator}** (the orchestrator):`,
+    topology,
+    ``,
+    `Commands:`,
+    `- Read pending mail:  \`team inbox ${self.id}\``,
+    `- Send a message:     \`team send --to <id> --type <type> --text "..."\`  (reference the relevant task when replying)`,
+    ``,
+    `Message types:`,
+    ...MESSAGE_TYPE_HELP.map(([t, meaning]) => `- ${t} — ${meaning}`),
+    ``,
+    `Examples:`,
+    ...examples,
     ``,
   ].join("\n");
 }

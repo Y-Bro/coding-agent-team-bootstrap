@@ -15,6 +15,7 @@ class SpyTmux implements TmuxCommands {
 }
 const noopSpawner: ProcessSpawner = { spawn: () => ({ async kill() {} } as ProcessHandle) };
 const noopLink: AgentLink = { async register() {}, async notify() {} };
+const noSleep = { sleep: async () => {} };
 const makeServers = (engines = resolveEngines({})) =>
   () => new ServersRuntime({ spawner: noopSpawner, engines, link: noopLink });
 
@@ -28,20 +29,20 @@ function serversCfg(engineKind: "server" | "repl"): { cfg: TeamConfig; engines: 
 
 test("selects PanesRuntime for runtime: panes", () => {
   const cfg = loadConfig("tests/config/fixtures/todo.yaml"); // runtime: panes
-  const rt = selectRuntime(cfg, new SpyTmux(), resolveEngines({}), makeServers());
+  const rt = selectRuntime(cfg, new SpyTmux(), resolveEngines({}), makeServers(), noSleep);
   assert.ok(rt instanceof PanesRuntime);
 });
 
 test("selects ServersRuntime for runtime: servers with server engines", () => {
   const { cfg, engines } = serversCfg("server");
-  const rt = selectRuntime(cfg, new SpyTmux(), engines, makeServers(engines));
+  const rt = selectRuntime(cfg, new SpyTmux(), engines, makeServers(engines), noSleep);
   assert.ok(rt instanceof ServersRuntime);
 });
 
 test("servers mode rejects a repl-only engine with a clear error", () => {
   const { cfg, engines } = serversCfg("repl");
   assert.throws(
-    () => selectRuntime(cfg, new SpyTmux(), engines, makeServers(engines)),
+    () => selectRuntime(cfg, new SpyTmux(), engines, makeServers(engines), noSleep),
     /requires kind:"server"/,
   );
 });
@@ -59,7 +60,7 @@ test("builds a CompositeRuntime for a MIXED team (some panes, some servers)", ()
     ...base,
     agents: base.agents.map((a, i) => (i === 0 ? { ...a, runtime: "servers" as const, engine: "srv" } : a)),
   };
-  const rt = selectRuntime(cfg, new SpyTmux(), engines, makeServers(engines));
+  const rt = selectRuntime(cfg, new SpyTmux(), engines, makeServers(engines), noSleep);
   assert.ok(rt instanceof CompositeRuntime);
 });
 
@@ -72,5 +73,5 @@ test("mixed team validates server-eligibility ONLY for agents hosted on servers"
     ...base,
     agents: base.agents.map((a, i) => (i === 0 ? { ...a, runtime: "servers" as const, engine: "rep" } : a)),
   };
-  assert.throws(() => selectRuntime(cfg, new SpyTmux(), engines, makeServers(engines)), /requires kind:"server"/);
+  assert.throws(() => selectRuntime(cfg, new SpyTmux(), engines, makeServers(engines), noSleep), /requires kind:"server"/);
 });

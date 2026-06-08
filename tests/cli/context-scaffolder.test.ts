@@ -37,8 +37,8 @@ test("writes one file per agent named by engine roleFile, guidance + footer", as
   const claude = files.get(at(".", "CLAUDE.md"))!;
   const codex = files.get(at(".", "AGENTS.md"))!;
   assert.equal(claude, "GUIDE\n\n" + claude.split("\n\n").slice(1).join("\n\n"));
-  assert.ok(claude.startsWith("GUIDE\n\n## Team wiring"));
-  assert.ok(codex.startsWith("GUIDE\n\n## Team wiring"));
+  assert.ok(claude.startsWith("GUIDE\n\n## How to communicate"));
+  assert.ok(codex.startsWith("GUIDE\n\n## How to communicate"));
 });
 
 test("null guidance writes wiring-only and warns", async () => {
@@ -46,7 +46,7 @@ test("null guidance writes wiring-only and warns", async () => {
   const warns: string[] = [];
   await new ContextScaffolder(fs, nullGen, reg, (m) => warns.push(m))
     .scaffold("t", [agents[0]!], base);
-  assert.ok(files.get(at(".", "CLAUDE.md"))!.startsWith("## Team wiring"));
+  assert.ok(files.get(at(".", "CLAUDE.md"))!.startsWith("## How to communicate"));
   assert.equal(warns.length, 1);
 });
 
@@ -75,7 +75,7 @@ test("names the file from a config-defined engine's custom roleFile", async () =
   const a = [{ id: "c", role: "writer", engine: "mine", subscribes: [] }];
   await new ContextScaffolder(fs, okGen("G"), customReg, () => {}).scaffold("t", a, base);
   assert.ok(files.has(at(".", "CUSTOM.md")));
-  assert.ok(files.get(at(".", "CUSTOM.md"))!.startsWith("G\n\n## Team wiring"));
+  assert.ok(files.get(at(".", "CUSTOM.md"))!.startsWith("G\n\n## How to communicate"));
 });
 
 test("does not prefix base onto an already-absolute workdir or worktree path", async () => {

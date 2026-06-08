@@ -41,5 +41,5 @@ test("--no-guidance writes wiring-only with no engine spawn", async () => {
   await runScaffoldCommand({ out, noGuidance: true }, { prompter, runner });
 
   assert.equal(runner.calls.length, 0);
-  assert.ok(readFileSync(join(dir, "shared/agent/CLAUDE.md"), "utf8").startsWith("## Team wiring"));
+  assert.ok(readFileSync(join(dir, "shared/agent/CLAUDE.md"), "utf8").startsWith("## How to communicate"));
 });
