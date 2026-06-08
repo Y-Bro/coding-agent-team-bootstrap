@@ -51,8 +51,21 @@ if (process.argv[2] === "new") {
   const deps = yes
     ? { prompter: new ScriptedPrompter(["team", "1", "1", "claude", "agent", "n"]) }
     : {};
-  await runScaffoldCommand({ out, noGuidance, force }, deps);
+  const { wantsUp } = await runScaffoldCommand({ out, noGuidance, force, yes }, deps);
   console.log(`Wrote ${out}`);
+  if (wantsUp) {
+    // Start the team via the SAME path `team up` uses — re-exec the bash launcher
+    // (like --detach does) with TEAM_CONFIG pointing at the freshly written file.
+    // Foreground: the launcher's `up` holds the broker socket until Ctrl-C/`down`.
+    const { spawnSync } = await import("node:child_process");
+    const { fileURLToPath } = await import("node:url");
+    const launcher = fileURLToPath(new URL("./team", import.meta.url));
+    const res = spawnSync(launcher, ["up"], {
+      stdio: "inherit", cwd: process.cwd(),
+      env: { ...process.env, TEAM_CONFIG: out },
+    });
+    process.exit(res.status ?? 0);
+  }
   process.exit(0);
 }
 

@@ -321,6 +321,8 @@ export interface ScaffoldOptions {
   noGuidance?: boolean;
   /** Overwrite an existing config unconditionally (skips the overwrite prompt). */
   force?: boolean;
+  /** Non-interactive: never auto-`team up` (mirrors `team init --yes`). */
+  yes?: boolean;
 }
 
 interface ScaffoldDeps {
@@ -341,7 +343,7 @@ const NULL_GUIDANCE: GuidanceGenerator = { async generate() { return null; } };
  * (the caller's scripted answers pick the engine) so the flow never depends on
  * which CLIs happen to be on PATH.
  */
-export async function runScaffoldCommand(opts: ScaffoldOptions, deps: ScaffoldDeps = {}): Promise<{ out: string }> {
+export async function runScaffoldCommand(opts: ScaffoldOptions, deps: ScaffoldDeps = {}): Promise<{ out: string; wantsUp: boolean }> {
   const which = new NodeWhich();
   const engines = resolveEngines({});
   const replEngines = engines.list().filter((e) => (e.kind ?? "repl") === "repl");
@@ -359,7 +361,7 @@ export async function runScaffoldCommand(opts: ScaffoldOptions, deps: ScaffoldDe
     if (!overwrite) {
       if (prompter instanceof NodePrompter) prompter.close();
       console.log(`Kept existing ${opts.out}; nothing written.`);
-      return { out: opts.out };
+      return { out: opts.out, wantsUp: false };
     }
   }
 
@@ -405,9 +407,11 @@ export async function runScaffoldCommand(opts: ScaffoldOptions, deps: ScaffoldDe
   await new ContextScaffolder(fs, generator, engines, (m) => console.warn(m))
     .scaffold(wiz.name, scaffoldAgents, base);
 
-  // 5) optional bring-up
-  const up = await prompter.confirm("Bring the team up now?", false);
+  // 5) bring-up decision (mirrors runInitCommand): --yes never auto-ups. The bin
+  // dispatch actually starts the team when wantsUp; on no/--yes we leave the user
+  // the actionable command (the same string runInitCommand prints).
+  const wantsUp = opts.yes ? false : await prompter.confirm("Bring the team up now?", false);
   if (prompter instanceof NodePrompter) prompter.close();
-  if (up) console.log(`Run \`TEAM_CONFIG=${opts.out} team up\` to start the team.`);
-  return { out: opts.out };
+  if (!wantsUp) console.log(`Run \`TEAM_CONFIG=${opts.out} team up\` to start the team.`);
+  return { out: opts.out, wantsUp };
 }
