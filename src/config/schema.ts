@@ -10,6 +10,7 @@ const EngineProfileSchema = z.object({
   roleFile: z.string(),
   env: z.record(z.string()).optional(),
   kind: z.enum(["repl", "server"]).default("repl"),
+  headlessArgs: z.array(z.string()).optional(),
 });
 
 const Agent = z
