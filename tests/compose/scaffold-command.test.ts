@@ -26,9 +26,10 @@ test("scaffolds team.yaml (windows, layout, root) and context files", async () =
   assert.equal(cfg.root, ".");
   assert.equal(cfg.agents.find((a: any) => a.id === "writer").window, "build");
   assert.equal(cfg.layout.build, "even-horizontal");
-  assert.ok(existsSync(join(dir, "CLAUDE.md")));   // lead (claude)
-  assert.ok(existsSync(join(dir, "AGENTS.md")));   // reviewer (codex)
-  assert.ok(readFileSync(join(dir, "CLAUDE.md"), "utf8").startsWith("ROLE GUIDE"));
+  // each agent's md lands under its own shared/<id>/ workdir (no same-engine collision)
+  assert.ok(existsSync(join(dir, "shared/lead/CLAUDE.md")));       // lead (claude)
+  assert.ok(existsSync(join(dir, "shared/reviewer/AGENTS.md")));   // reviewer (codex)
+  assert.ok(readFileSync(join(dir, "shared/lead/CLAUDE.md"), "utf8").startsWith("ROLE GUIDE"));
 });
 
 test("--no-guidance writes wiring-only with no engine spawn", async () => {
@@ -40,5 +41,5 @@ test("--no-guidance writes wiring-only with no engine spawn", async () => {
   await runScaffoldCommand({ out, noGuidance: true }, { prompter, runner });
 
   assert.equal(runner.calls.length, 0);
-  assert.ok(readFileSync(join(dir, "CLAUDE.md"), "utf8").startsWith("## Team wiring"));
+  assert.ok(readFileSync(join(dir, "shared/agent/CLAUDE.md"), "utf8").startsWith("## Team wiring"));
 });
