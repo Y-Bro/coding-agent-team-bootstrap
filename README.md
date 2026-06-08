@@ -117,7 +117,12 @@ team new            # interactive: name, engines, windows/layout; writes team.ya
 team new --yes      # non-interactive solo default
 team new --no-guidance   # skip LLM role-guidance generation (wiring-only, no engine spawn)
 team new --out path/to/team.yaml
+team new --force    # overwrite an existing team.yaml (otherwise you're prompted; --yes keeps it)
 ```
+
+`team new` never clobbers an existing config silently: if the target already
+exists it prompts before overwriting (default **no**), `--yes` keeps the existing
+file untouched, and `--force` overwrites unconditionally.
 
 For each agent, `team new` writes the context file its engine reads on boot —
 named by that engine's role file (`CLAUDE.md` for claude, `AGENTS.md` for
