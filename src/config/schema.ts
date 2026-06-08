@@ -10,6 +10,7 @@ const EngineProfileSchema = z.object({
   roleFile: z.string(),
   env: z.record(z.string()).optional(),
   kind: z.enum(["repl", "server"]).default("repl"),
+  headlessArgs: z.array(z.string()).optional(),
 });
 
 const Agent = z
@@ -107,6 +108,12 @@ const Dashboard = z
  * field is the seam for a future network pub/sub (Kafka, Google Pub/Sub). */
 const Bus = z.object({ kind: z.enum(["memory"]).default("memory") }).default({});
 
+/** `team new` scaffold settings: which engine drafts per-agent role guidance.
+ * `generator` is validated against the known engine set in the top-level refine. */
+const Scaffold = z.object({
+  generator: z.string().min(1).default("claude"),
+}).default({});
+
 /** Liveness timers (v3.1-m4): a Clock-driven sweep re-nudges stalled tasks and
  * dead-letters unanswered review requests. All in milliseconds. */
 const Timers = z.object({
@@ -127,6 +134,7 @@ export const TeamConfigSchema = z.object({
   dashboard: Dashboard,
   bus: Bus,
   timers: Timers,
+  scaffold: Scaffold,
   engines: z.record(EngineProfileSchema).optional(),
   agents: z.array(Agent).min(1),
   windows: z.array(z.string()).default([]),
@@ -154,6 +162,14 @@ export const TeamConfigSchema = z.object({
         message: `unknown engine "${a.engine}" for agent ${a.id}; valid: ${[...names].join(", ")}`,
       });
     }
+  }
+  // The scaffold generator must resolve to the same engine set as agents.
+  if (!names.has(cfg.scaffold.generator)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["scaffold", "generator"],
+      message: `scaffold generator "${cfg.scaffold.generator}" is not a known engine; valid: ${[...names].join(", ")}`,
+    });
   }
 });
 
