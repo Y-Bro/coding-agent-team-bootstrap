@@ -1,6 +1,7 @@
 import type { AgentCard, Message } from "../a2a/index.ts";
 import type { Transport } from "./transport.ts";
 import type { Scheduler } from "../runtime/servers/scheduler.ts";
+import { trace } from "../obs/trace.ts";
 
 /** The slice of an A2A client the transport needs (satisfied by A2AClient). */
 export interface A2ASender {
@@ -34,6 +35,7 @@ export class A2ATransport implements Transport {
   constructor(private endpoints: A2AEndpoints, private webhook?: WebhookSender, private scheduler?: Scheduler) {}
 
   async deliver(recipient: AgentCard, message: Message): Promise<void> {
+    trace("a2a", `deliver ${message.id} → ${recipient.id} (${this.scheduler ? "via scheduler" : "direct"})`);
     const send = () => this.send(recipient, message);
     if (this.scheduler) return this.scheduler.run(recipient.id, send);
     return send();
@@ -41,9 +43,11 @@ export class A2ATransport implements Transport {
 
   private async send(recipient: AgentCard, message: Message): Promise<void> {
     if (this.webhook) {
+      trace("a2a", `webhook push → ${recipient.id} ${recipient.url ?? ""}/webhook`);
       await this.webhook.push(recipient, message);
       return;
     }
+    trace("a2a", `message/send → ${recipient.id}`);
     await this.endpoints.clientFor(recipient).sendMessage(message);
   }
 

@@ -2,6 +2,7 @@ import type { Runtime, SpawnCtx } from "../runtime.ts";
 import type { AgentCard } from "../../a2a/index.ts";
 import type { EngineRegistry } from "../../engines/index.ts";
 import type { ProcessSpawner, ProcessHandle } from "../../ports/process.ts";
+import { trace } from "../../obs/trace.ts";
 
 /**
  * The A2A/HTTP surface the servers runtime uses to register a spawned agent
@@ -46,6 +47,7 @@ export class ServersRuntime implements Runtime {
   async spawn(agent: AgentCard, ctx: SpawnCtx): Promise<void> {
     assertServerEngine(agent.engine, this.deps.engines);
     const profile = this.deps.engines.get(agent.engine)!;
+    trace("servers", `spawn ${agent.id}: process ${profile.command} (server engine) + link.register`);
     const handle = this.deps.spawner.spawn(profile.command, {
       args: profile.args,
       env: { ...(profile.env ?? {}), TEAM_AGENT_ID: agent.id, TEAM_BROKER_SOCKET: ctx.socketPath },
@@ -59,6 +61,7 @@ export class ServersRuntime implements Runtime {
   async wake(agentId: string, summary: string): Promise<void> {
     const card = this.cards.get(agentId);
     if (!card) throw new Error(`unknown agent: ${agentId}`);
+    trace("servers", `wake ${agentId}: link.notify (A2A push) "${summary}"`);
     await this.deps.link.notify(card, summary);
   }
 

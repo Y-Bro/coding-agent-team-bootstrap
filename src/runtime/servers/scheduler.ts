@@ -1,5 +1,6 @@
 import type { Clock } from "../../ports/clock.ts";
 import type { Sleeper } from "../../ports/sleeper.ts";
+import { trace } from "../../obs/trace.ts";
 
 /**
  * Gate for fleet-wide work: every model-triggering call goes through `run`, which
@@ -77,6 +78,7 @@ export class FleetScheduler implements Scheduler {
   }
 
   async run<T>(_agentId: string, call: () => Promise<T>): Promise<T> {
+    trace("scheduler", `run for ${_agentId}: acquire slot (active=${this.active}) + token (have=${Math.floor(this.tokens)})`);
     await this.acquireSlot();
     try {
       await this.consumeToken();

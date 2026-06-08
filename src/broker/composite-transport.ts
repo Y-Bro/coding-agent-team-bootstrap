@@ -1,6 +1,7 @@
 import type { AgentCard, Message } from "../a2a/index.ts";
 import type { Transport } from "./transport.ts";
 import type { RuntimeKind } from "../runtime/composite.ts";
+import { trace } from "../obs/trace.ts";
 
 /**
  * v3 mixed-runtime bridge (LEAD DECISION Q2). The broker delivers every routed
@@ -17,7 +18,9 @@ export class CompositeTransport implements Transport {
   ) {}
 
   async deliver(recipient: AgentCard, message: Message): Promise<void> {
-    await this.transports[this.resolve(recipient)].deliver(recipient, message);
+    const kind = this.resolve(recipient);
+    trace("composite-transport", `route ${message.id} → ${recipient.id} via ${kind} transport`);
+    await this.transports[kind].deliver(recipient, message);
   }
 
   async listen(): Promise<void> {
