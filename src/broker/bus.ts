@@ -1,4 +1,5 @@
 import type { Message } from "../a2a/index.ts";
+import { trace } from "../obs/trace.ts";
 
 /** Publish a recorded message to subscribers. Async so a future network-backed
  * bus (Kafka, Google Pub/Sub) is a new implementation, never an interface change. */
@@ -24,6 +25,7 @@ export class MemoryBus implements MessagePublisher, MessageSubscriber {
   private listeners = new Set<(message: Message) => void>();
 
   async publish(message: Message): Promise<void> {
+    trace("bus", `publish ${message.id} (type=${message.type}) → fan-out to ${this.listeners.size} subscriber(s)`);
     for (const listener of [...this.listeners]) listener(message);
   }
 

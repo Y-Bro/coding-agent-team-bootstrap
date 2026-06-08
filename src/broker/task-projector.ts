@@ -1,5 +1,6 @@
 import type { Message, TaskState } from "../a2a/index.ts";
 import type { TaskLifecycle } from "./tasks.ts";
+import { trace } from "../obs/trace.ts";
 
 /** Message type → task state. Only these types affect task lifecycle; everything
  * else (including the projector's own `task_status` output) is ignored. */
@@ -29,6 +30,7 @@ export class TaskProjector {
     if (!m.task) return;
     const to = TYPE_TO_STATE[m.type];
     if (!to) return;
+    trace("task-projector", `${m.type} on task=${m.task} → ensure(owner=${m.to}) + transition→${to}`);
     this.machine.ensure(m.task, { title: titleOf(m), owner: m.to });
     try {
       this.machine.transition(m.task, to);

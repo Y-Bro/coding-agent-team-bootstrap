@@ -1,5 +1,6 @@
 import type { Clock } from "../ports/clock.ts";
 import type { Sleeper } from "../ports/sleeper.ts";
+import { trace } from "../obs/trace.ts";
 
 /** A single liveness check evaluated once per sweep tick. Extend the sweep by
  * adding implementations — never by editing the loop. */
@@ -22,10 +23,12 @@ export class SweepLoop {
 
   tick(): void {
     const now = this.deps.clock.now();
+    trace("sweep", `tick @ ${now.toISOString()} → ${this.deps.policies.length} policies`);
     for (const p of this.deps.policies) p.run(now);
   }
 
   async start(): Promise<void> {
+    trace("sweep", `start: loop every ${this.deps.intervalMs}ms`);
     this.running = true;
     while (this.running) {
       this.tick();
@@ -33,5 +36,5 @@ export class SweepLoop {
     }
   }
 
-  stop(): void { this.running = false; }
+  stop(): void { trace("sweep", "stop"); this.running = false; }
 }

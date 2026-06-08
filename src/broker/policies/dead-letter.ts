@@ -2,6 +2,7 @@ import type { Message } from "../../a2a/index.ts";
 import type { MessageStore } from "../store.ts";
 import type { IdGenerator } from "../../ports/ids.ts";
 import type { SweepPolicy } from "../sweep.ts";
+import { trace } from "../../obs/trace.ts";
 
 const ANSWER_TYPES = new Set(["approval", "ruling", "review_comment"]);
 
@@ -48,6 +49,7 @@ export class DeadLetterPolicy implements SweepPolicy {
       const answered = answers.some((a) => a.task === r.task && Date.parse(a.ts) > reqTs);
       if (answered) continue;
       if (now.getTime() - reqTs <= this.deps.deadLetterMs) continue;
+      trace("sweep:dead-letter", `review_request ${r.id} (task ${r.task}) unanswered > deadLetterMs → escalate to lead=${this.deps.lead} (once)`);
       this.escalated.add(r.id); // guard within this run too (and across same-run requests)
       this.deps.emit({
         id: this.deps.ids.next("m"), task: r.task, from: "broker", to: this.deps.lead, type: "escalation",

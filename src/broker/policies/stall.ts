@@ -3,6 +3,7 @@ import type { MessageStore } from "../store.ts";
 import type { IdGenerator } from "../../ports/ids.ts";
 import { TASK_EVENT_TYPE } from "../tasks.ts";
 import type { SweepPolicy } from "../sweep.ts";
+import { trace } from "../../obs/trace.ts";
 
 /** Narrow nudge seam (the runtime's waker). */
 export interface Nudger { wake(agentId: string, summary: string): Promise<void>; }
@@ -33,6 +34,7 @@ export class StallPolicy implements SweepPolicy {
     for (const [taskId, t] of latest) {
       if (t.state !== "working") continue;
       if (now.getTime() - t.ts <= this.deps.stallMs) continue;
+      trace("sweep:stall", `task ${taskId} working ${Math.round((now.getTime() - t.ts) / 1000)}s > stallMs → re-nudge owner=${t.owner} + emit stall_flag`);
       void this.deps.waker.wake(t.owner, `task ${taskId} stalled in working`);
       this.deps.emit({
         id: this.deps.ids.next("m"), task: taskId, from: "broker", to: t.owner, type: "stall_flag",

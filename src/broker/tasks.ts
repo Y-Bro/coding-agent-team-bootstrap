@@ -2,6 +2,7 @@ import type { MessageStore } from "./store.ts";
 import type { Clock } from "../ports/clock.ts";
 import type { IdGenerator } from "../ports/ids.ts";
 import type { Message, Task, TaskState } from "../a2a/index.ts";
+import { trace } from "../obs/trace.ts";
 
 /** Message type used to persist task lifecycle events in the shared JSONL log. */
 export const TASK_EVENT_TYPE = "task_status";
@@ -87,6 +88,7 @@ export class TaskMachine implements TaskLifecycle {
   ensure(id: string, input: { title: string; owner: string }): Task {
     const existing = this.tasks.get(id);
     if (existing) return existing;
+    trace("tasks", `ensure ${id}: create in 'submitted' (owner=${input.owner})`);
     const task: Task = { id, title: input.title, state: "submitted", owner: input.owner, history: [], artifacts: [] };
     this.tasks.set(id, task);
     this.record({ taskId: id, state: "submitted", title: input.title, owner: input.owner });
@@ -101,6 +103,7 @@ export class TaskMachine implements TaskLifecycle {
     if (!LEGAL_TRANSITIONS[task.state].includes(to)) {
       throw new Error(`illegal task transition: ${task.state} -> ${to}`);
     }
+    trace("tasks", `transition ${taskId}: ${task.state} → ${to}`);
     const updated: Task = { ...task, state: to };
     this.tasks.set(taskId, updated);
     this.record({ taskId, state: to });
