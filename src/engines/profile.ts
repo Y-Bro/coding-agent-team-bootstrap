@@ -26,4 +26,11 @@ export interface EngineProfile {
   args?: string[];
   /** Extra environment variables for the engine process. */
   env?: Record<string, string>;
+  /**
+   * Argv that turns this engine into a one-shot, non-interactive prompt runner.
+   * The guidance generator spawns `command` with `[...args, ...headlessArgs, prompt]`.
+   * Absent ⇒ the engine cannot generate guidance (caller falls back to wiring-only).
+   * e.g. claude/cursor-agent: ["-p"]; codex: ["exec"].
+   */
+  headlessArgs?: string[];
 }
