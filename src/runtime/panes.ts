@@ -2,8 +2,15 @@ import type { Runtime, SpawnCtx } from "./runtime.ts";
 import type { TmuxCommands } from "../ports/tmux.ts";
 import type { AgentCard } from "../a2a/index.ts";
 import type { EngineRegistry } from "../engines/index.ts";
+import type { Sleeper } from "../ports/sleeper.ts";
 
 const DEFAULT_LAYOUT = "even-horizontal";
+/**
+ * Pause between typing a pane's text and pressing Enter. Some engines (codex,
+ * cursor-agent) drop an Enter that arrives in the same send-keys call as the
+ * text (render race), so we type, wait, then submit as a separate keystroke.
+ */
+const SUBMIT_DELAY_MS = 400;
 
 /** v1 runtime: each agent is a tmux pane; wake = send-keys nudge. */
 export class PanesRuntime implements Runtime {
@@ -18,7 +25,19 @@ export class PanesRuntime implements Runtime {
     private tmux: TmuxCommands,
     private session: string,
     private engines: EngineRegistry,
+    private sleeper: Sleeper,
   ) {}
+
+  /**
+   * Type literal text into a pane, then submit Enter as a SEPARATE send-keys
+   * call after a short delay — so engines that race the Enter against rendering
+   * (codex, cursor-agent) reliably auto-submit. `-l` keeps the text literal.
+   */
+  private async typeAndSubmit(target: string, text: string): Promise<void> {
+    this.tmux.run(["send-keys", "-t", target, "-l", text]);
+    await this.sleeper.sleep(SUBMIT_DELAY_MS);
+    this.tmux.run(["send-keys", "-t", target, "Enter"]);
+  }
 
   async spawn(agent: AgentCard, ctx: SpawnCtx): Promise<void> {
     const p = this.engines.get(agent.engine);
@@ -31,14 +50,13 @@ export class PanesRuntime implements Runtime {
     const windowName = ctx.config.agents.find((a) => a.id === agent.id)?.window ?? agent.id;
     const paneId = this.placePane(windowName, agent.workdir, ctx.config.layout);
     this.paneIds.set(agent.id, paneId);
-    this.tmux.run(["send-keys", "-t", paneId, launch, "Enter"]);
+    await this.typeAndSubmit(paneId, launch);
   }
 
   async wake(agentId: string, summary: string): Promise<void> {
     // Target the stable pane id — tmux automatic-rename breaks session:name.
     const target = this.paneIds.get(agentId) ?? `${this.session}:${agentId}`;
-    this.tmux.run(["send-keys", "-t", target,
-      `# ▶ mail — ${summary} — run: team inbox`, "Enter"]);
+    await this.typeAndSubmit(target, `# ▶ mail — ${summary} — run: team inbox`);
   }
 
   async teardown(): Promise<void> {

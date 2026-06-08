@@ -115,6 +115,9 @@ export function buildContainer(cfg: TeamConfig, templates: Record<string, string
   const engines = resolveEngines(cfg);
   const clock = new SystemClock();
   const ids = new UuidGenerator();
+  // One shared Sleeper for all delaying collaborators (sweep loop, fleet
+  // scheduler, and the panes runtime's type→Enter submit pause).
+  const sleeper = new RealSleeper();
   // All broker artifacts live alongside the socket, so a run-from-anywhere team
   // (absolute socket under base/.team) keeps its messages/feed/cards together.
   const teamDir = dirname(cfg.broker.socket);
@@ -180,7 +183,7 @@ export function buildContainer(cfg: TeamConfig, templates: Record<string, string
     const auth = cfg.servers.auth ? new BrokerAuthProvider(ids, { clock, secret, ttlMs }) : undefined;
     const tokens = new Map(auth ? cfg.agents.map((a) => [a.id, auth.issueToken(a.id)] as const) : []);
     tokenFor = (id) => tokens.get(id);
-    const scheduler = new FleetScheduler({ clock, sleeper: new RealSleeper(), config: cfg.servers.rateLimit });
+    const scheduler = new FleetScheduler({ clock, sleeper, config: cfg.servers.rateLimit });
     endpoints = a2aEndpoints(discovery, tokenFor, clientTls);
     a2aTransport = new A2ATransport(endpoints, a2aWebhook(discovery, tokenFor, clientTls), scheduler);
   }
@@ -208,7 +211,7 @@ export function buildContainer(cfg: TeamConfig, templates: Record<string, string
   const isoOf = (d: Date) => d.toISOString();
   const lead = cfg.agents[0]!.id; // convention: first agent is the lead/owner of escalations
   const sweep = new SweepLoop({
-    clock, sleeper: new RealSleeper(), intervalMs: cfg.timers.sweepIntervalMs,
+    clock, sleeper, intervalMs: cfg.timers.sweepIntervalMs,
     policies: [
       new StallPolicy({ store, stallMs: cfg.timers.stallMs, waker: { wake: (id, s) => runtime.wake(id, s) }, emit, ids, isoOf }),
       new DeadLetterPolicy({ store, deadLetterMs: cfg.timers.deadLetterMs, lead, emit, ids, isoOf }),
@@ -224,7 +227,7 @@ export function buildContainer(cfg: TeamConfig, templates: Record<string, string
     : () => { throw new Error("servers runtime factory called without a servers agent"); };
   // selectRuntime validates server-engine eligibility and builds panes/servers/
   // composite as the team requires; the socket transport's lazy waker now resolves.
-  runtime = selectRuntime(cfg, new NodeTmux(), engines, makeServersRuntime);
+  runtime = selectRuntime(cfg, new NodeTmux(), engines, makeServersRuntime, sleeper);
 
   // v3 COEXIST (Q1): in direct mode the sender delivers peer-to-peer and the
   // broker only observes. Same-process wiring posts the observer copy in-process;
