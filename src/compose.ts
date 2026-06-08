@@ -44,6 +44,11 @@ import { runDoctor, type DoctorReport } from "./bootstrap/doctor.ts";
 import { runWizard, writeConfigYaml } from "./cli/wizard.ts";
 import { formatDoctorReport } from "./cli/doctor-cmd.ts";
 import { TeamConfigSchema } from "./config/schema.ts";
+import { LayoutPlanner } from "./cli/layout-planner.ts";
+import { ContextScaffolder, type ScaffoldAgent } from "./cli/context-scaffolder.ts";
+import { EngineGuidanceGenerator } from "./cli/guidance-engine.ts";
+import { NodeCommandRunner, type CommandRunner } from "./ports/command.ts";
+import type { GuidanceGenerator } from "./ports/guidance.ts";
 import { dirname, join } from "node:path";
 
 type TokenFor = (agentId: string) => string | undefined;
@@ -308,5 +313,105 @@ export async function runInitCommand(
 
   const wantsUp = opts.yes ? false : await confirmUp(prompter);
   if (prompter instanceof NodePrompter) prompter.close();
+  return { out: opts.out, wantsUp };
+}
+
+export interface ScaffoldOptions {
+  out: string;
+  noGuidance?: boolean;
+  /** Overwrite an existing config unconditionally (skips the overwrite prompt). */
+  force?: boolean;
+  /** Non-interactive: never auto-`team up` (mirrors `team init --yes`). */
+  yes?: boolean;
+}
+
+interface ScaffoldDeps {
+  prompter?: Prompter;
+  runner?: CommandRunner;
+}
+
+const NULL_GUIDANCE: GuidanceGenerator = { async generate() { return null; } };
+
+/**
+ * Compose the `team new` flow: probe availability, run the wizard, plan windows/
+ * layout, write team.yaml (root: "."), then write per-engine context files
+ * (generated guidance + wiring, or wiring-only on failure). Optionally `team up`.
+ *
+ * For headless tests an injected `prompter` (scripted) + `runner` (fake) keep the
+ * whole flow off the real shell; the default path constructs NodePrompter +
+ * NodeCommandRunner. When a prompter is injected, every repl engine is offerable
+ * (the caller's scripted answers pick the engine) so the flow never depends on
+ * which CLIs happen to be on PATH.
+ */
+export async function runScaffoldCommand(opts: ScaffoldOptions, deps: ScaffoldDeps = {}): Promise<{ out: string; wantsUp: boolean }> {
+  const which = new NodeWhich();
+  const engines = resolveEngines({});
+  const replEngines = engines.list().filter((e) => (e.kind ?? "repl") === "repl");
+
+  const prompter = deps.prompter ?? new NodePrompter();
+  const runner = deps.runner ?? new NodeCommandRunner();
+  const fs = new NodeFileSystem();
+
+  // Overwrite guard: never clobber an existing config silently. --force overwrites
+  // unconditionally; otherwise prompt (default NO) and on "no" abort the whole
+  // scaffold — write nothing and skip context files. (`team new --yes` keeps an
+  // existing config by short-circuiting in bin before we get here.)
+  if (fs.exists(opts.out) && !opts.force) {
+    const overwrite = await prompter.confirm(`${opts.out} already exists — overwrite it?`, false);
+    if (!overwrite) {
+      if (prompter instanceof NodePrompter) prompter.close();
+      console.log(`Kept existing ${opts.out}; nothing written.`);
+      return { out: opts.out, wantsUp: false };
+    }
+  }
+
+  // Interactive: offer only engines on PATH (+ a guaranteed first choice).
+  // Headless (injected prompter): offer every repl engine so scripted answers work.
+  const available = new Set<string>();
+  if (deps.prompter) {
+    for (const e of replEngines) available.add(e.name);
+  } else {
+    for (const e of engines.list()) if (await which.has(e.command)) available.add(e.name);
+    const firstAvailable = replEngines.find((e) => available.has(e.name))?.name ?? replEngines[0]?.name ?? "claude";
+    available.add(firstAvailable);
+  }
+
+  // 1) team shape + engines
+  const wiz = await runWizard({ prompter, engines, available });
+
+  // 2) windows + layout
+  const plan = await new LayoutPlanner(prompter).plan(
+    wiz.agents.map((a) => ({ id: a.id, role: a.role, engine: a.engine })),
+  );
+
+  // 3) assemble config (fills existing window/layout fields; root anchors here)
+  const cfg: Record<string, unknown> = {
+    ...wiz,
+    root: ".",
+    agents: wiz.agents.map((a) => ({ ...a, window: plan.windowByAgent[a.id] })),
+    layout: plan.layoutByWindow,
+  };
+  const parsed = TeamConfigSchema.parse(cfg); // validate before writing; capture defaults
+  await writeConfigYaml(opts.out, cfg);
+
+  // 4) context files
+  const base = dirname(opts.out);
+  // Source the generator engine from the validated config (default "claude"),
+  // not a hardcoded literal — so scaffold.generator drives guidance generation.
+  const generator: GuidanceGenerator = opts.noGuidance
+    ? NULL_GUIDANCE
+    : new EngineGuidanceGenerator(runner, engines, parsed.scaffold.generator);
+  const scaffoldAgents: ScaffoldAgent[] = wiz.agents.map((a) => ({
+    id: a.id, role: a.role, engine: a.engine, subscribes: [],
+  }));
+  await new ContextScaffolder(fs, generator, engines, (m) => console.warn(m))
+    .scaffold(wiz.name, scaffoldAgents, base);
+
+  // 5) bring-up decision (mirrors runInitCommand): --yes never auto-ups. The bin
+  // dispatch actually starts the team when wantsUp; on no/--yes we leave the user
+  // the actionable command (the same string runInitCommand prints).
+  const wantsUp = opts.yes ? false : await prompter.confirm("Bring the team up now?", false);
+  if (prompter instanceof NodePrompter) prompter.close();
+  if (!wantsUp) console.log(`Run \`TEAM_CONFIG=${opts.out} team up\` to start the team.`);
   return { out: opts.out, wantsUp };
 }

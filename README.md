@@ -100,6 +100,50 @@ Useful environment variables for the client verbs:
 - `TEAM_SOCKET` — broker socket path (default `.team/broker.sock`).
 - `TEAM_CONFIG` — config path for `up`/`down` (default `team.yaml`).
 
+## Scaffold a team in any folder
+
+`team init` writes a config; `team new` goes one step further — it scaffolds a
+*working* team into the current directory: a `team.yaml` (with `root: .`),
+interactive window/pane layout, and one **context file per agent**, all in one
+step. Install the CLI once, then run it from anywhere:
+
+```bash
+# one-time, from this repo
+npm link            # exposes `team` on your PATH
+
+# from ANY folder
+cd ~/my-project
+team new            # interactive: name, engines, windows/layout; writes team.yaml + context files
+team new --yes      # non-interactive solo default
+team new --no-guidance   # skip LLM role-guidance generation (wiring-only, no engine spawn)
+team new --out path/to/team.yaml
+team new --force    # overwrite an existing team.yaml (otherwise you're prompted; --yes keeps it)
+```
+
+`team new` never clobbers an existing config silently: if the target already
+exists it prompts before overwriting (default **no**), `--yes` keeps the existing
+file untouched, and `--force` overwrites unconditionally.
+
+For each agent, `team new` writes the context file its engine reads on boot —
+named by that engine's role file (`CLAUDE.md` for claude, `AGENTS.md` for
+codex/cursor-agent, or a custom engine's `roleFile`). Each file gets a
+deterministic **team-wiring footer** (who you are, your teammates, the message
+types you receive, and the `team inbox` / `team send` commands). When a generator
+engine is available it also drafts role-appropriate guidance above the footer;
+if generation is unavailable or fails, the file falls back to wiring-only with a
+warning — the scaffold never aborts. Existing context files are never
+overwritten (they're skipped with a warning).
+
+Config knobs:
+
+- `scaffold.generator` — which engine drafts role guidance (default `claude`,
+  validated against the same engine set as agents). `--no-guidance` skips it
+  entirely (no engine spawn).
+- Per engine profile, `headlessArgs` — the argv that runs an engine as a one-shot
+  prompt (`[...args, ...headlessArgs, prompt]`). Built in for claude (`-p`),
+  codex (`exec`), and cursor-agent (`-p`); engines without it degrade to
+  wiring-only guidance.
+
 ## The `team` CLI
 
 | Verb | Description | Example |

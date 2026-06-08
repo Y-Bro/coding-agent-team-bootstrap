@@ -30,6 +30,45 @@ if (process.argv[2] === "init") {
   process.exit(0);
 }
 
+if (process.argv[2] === "new") {
+  const { runScaffoldCommand } = await import("../src/compose.ts");
+  const { ScriptedPrompter } = await import("../src/ports/prompter.ts");
+  const rest = process.argv.slice(3);
+  const yes = rest.includes("--yes");
+  const noGuidance = rest.includes("--no-guidance");
+  const force = rest.includes("--force");
+  const outIdx = rest.indexOf("--out");
+  const out = outIdx >= 0 && rest[outIdx + 1] ? rest[outIdx + 1]! : "team.yaml";
+  // --yes keeps an existing config: no clobber, no prompt (the headless --yes
+  // script has no overwrite answer, so short-circuit here unless --force).
+  const { existsSync } = await import("node:fs");
+  if (yes && existsSync(out) && !force) {
+    console.log(`Kept existing ${out} (use --force to overwrite).`);
+    process.exit(0);
+  }
+  // --yes: drive a solo/panes default headlessly (name, runtime=1, preset=1=solo,
+  // engine, window(agent)=agent, confirm=n). Mirrors `team init --yes`.
+  const deps = yes
+    ? { prompter: new ScriptedPrompter(["team", "1", "1", "claude", "agent", "n"]) }
+    : {};
+  const { wantsUp } = await runScaffoldCommand({ out, noGuidance, force, yes }, deps);
+  console.log(`Wrote ${out}`);
+  if (wantsUp) {
+    // Start the team via the SAME path `team up` uses — re-exec the bash launcher
+    // (like --detach does) with TEAM_CONFIG pointing at the freshly written file.
+    // Foreground: the launcher's `up` holds the broker socket until Ctrl-C/`down`.
+    const { spawnSync } = await import("node:child_process");
+    const { fileURLToPath } = await import("node:url");
+    const launcher = fileURLToPath(new URL("./team", import.meta.url));
+    const res = spawnSync(launcher, ["up"], {
+      stdio: "inherit", cwd: process.cwd(),
+      env: { ...process.env, TEAM_CONFIG: out },
+    });
+    process.exit(res.status ?? 0);
+  }
+  process.exit(0);
+}
+
 // Lifecycle verbs (`team up` / `team down`) run the composition root: start the
 // broker daemon and bootstrap (or tear down) the team described by team.yaml.
 if (process.argv[2] === "up" || process.argv[2] === "down") {
@@ -112,7 +151,7 @@ if (process.argv[2] === "up" || process.argv[2] === "down") {
 // does NOT exit (the socket keeps the event loop alive), so it must NOT fall
 // through to commander here — that would print "unknown command up" and exit(1),
 // killing the just-started broker.
-if (!["doctor", "init", "up", "down"].includes(process.argv[2] ?? "")) {
+if (!["doctor", "init", "up", "down", "new"].includes(process.argv[2] ?? "")) {
   const client = new BrokerClient(new NodeSocketClient(), socket);
   const program = buildProgram(client, agentId, (s) => console.log(s));
 
