@@ -1,13 +1,16 @@
 import { NodeSocketClient } from "../src/ports/transport.ts";
 import { BrokerClient } from "../src/client/rpc.ts";
 import { buildProgram } from "../src/client/cli.ts";
+import { trace } from "../src/obs/trace.ts";
 
 const agentId = process.env.TEAM_AGENT_ID ?? "operator";
 const socket = process.env.TEAM_SOCKET ?? ".team/broker.sock";
+trace("bin", `entry argv=[${process.argv.slice(2).join(" ")}] agentId=${agentId} socket=${socket}`);
 
 // Setup verbs (`team doctor` / `team init`) run their own composition roots and
 // exit; they don't touch the broker socket.
 if (process.argv[2] === "doctor") {
+  trace("bin", "verb=doctor → runDoctorCommand");
   const { runDoctorCommand } = await import("../src/compose.ts");
   const { report, text } = await runDoctorCommand();
   console.log(text);
@@ -15,6 +18,7 @@ if (process.argv[2] === "doctor") {
 }
 
 if (process.argv[2] === "init") {
+  trace("bin", "verb=init → runInitCommand");
   const { runInitCommand } = await import("../src/compose.ts");
   const rest = process.argv.slice(3);
   const yes = rest.includes("--yes");
@@ -31,6 +35,7 @@ if (process.argv[2] === "init") {
 }
 
 if (process.argv[2] === "new") {
+  trace("bin", "verb=new → runScaffoldCommand");
   const { runScaffoldCommand } = await import("../src/compose.ts");
   const { ScriptedPrompter } = await import("../src/ports/prompter.ts");
   const rest = process.argv.slice(3);
@@ -39,6 +44,7 @@ if (process.argv[2] === "new") {
   const force = rest.includes("--force");
   const outIdx = rest.indexOf("--out");
   const out = outIdx >= 0 && rest[outIdx + 1] ? rest[outIdx + 1]! : "team.yaml";
+  trace("bin", `new flags: out=${out} yes=${yes} noGuidance=${noGuidance} force=${force}`);
   // --yes keeps an existing config: no clobber, no prompt (the headless --yes
   // script has no overwrite answer, so short-circuit here unless --force).
   const { existsSync } = await import("node:fs");
@@ -72,6 +78,7 @@ if (process.argv[2] === "new") {
 // Lifecycle verbs (`team up` / `team down`) run the composition root: start the
 // broker daemon and bootstrap (or tear down) the team described by team.yaml.
 if (process.argv[2] === "up" || process.argv[2] === "down") {
+  trace("bin", `verb=${process.argv[2]} → load config + buildContainer`);
   const { loadConfig, resolveBase, resolveConfigPaths } = await import("../src/config/index.ts");
   const { buildContainer } = await import("../src/compose.ts");
   const { teamUp, teamDown } = await import("../src/client/lifecycle.ts");
@@ -84,6 +91,7 @@ if (process.argv[2] === "up" || process.argv[2] === "down") {
   // team + its .team artifacts live where the config does, not the cwd.
   const base = resolveBase(loadConfig(configPath), configPath);
   const cfg = resolveConfigPaths(loadConfig(configPath), base);
+  trace("bin", `config=${configPath} base=${base} team=${cfg.name} runtime=${cfg.runtime} agents=${cfg.agents.length}`);
 
   // Read each distinct role template the config references (template name, else role).
   const templates: Record<string, string> = {};
@@ -124,12 +132,14 @@ if (process.argv[2] === "up" || process.argv[2] === "down") {
     }
     const { BrokerAlreadyRunningError } = await import("../src/ports/transport.ts");
     try {
+      trace("bin", "up: buildContainer → teamUp");
       const { daemon, bootstrapper, dashboard, sweep } = buildContainer(cfg, templates);
       await teamUp(daemon, bootstrapper, socketPath, { fs, proc, pidfile, socket: socketPath });
       console.log(`team up: ${cfg.name} — ${cfg.agents.length} agents on ${socketPath} (Ctrl-C or \`team down\` to stop)`);
       // Liveness sweep runs alongside the broker; stop it on clean shutdown.
+      trace("bin", "up: starting liveness sweep loop");
       void sweep.start();
-      proc.onShutdown(() => sweep.stop());
+      proc.onShutdown(() => { trace("bin", "shutdown signal → sweep.stop"); sweep.stop(); });
       if (dashboard) {
         await dashboard.server.listen(dashboard.port);
         console.log(`dashboard (read-only): http://${cfg.servers.host}:${dashboard.port}`);
@@ -141,6 +151,7 @@ if (process.argv[2] === "up" || process.argv[2] === "down") {
       throw e;
     }
   } else {
+    trace("bin", "down: teamDown (signal broker pid + remove socket)");
     const ok = await teamDown({ fs, proc, pidfile, socket: socketPath });
     console.log(ok ? `team down: ${cfg.name}` : "team down: no running broker (no pidfile)");
     process.exit(ok ? 0 : 1);
@@ -152,6 +163,7 @@ if (process.argv[2] === "up" || process.argv[2] === "down") {
 // through to commander here — that would print "unknown command up" and exit(1),
 // killing the just-started broker.
 if (!["doctor", "init", "up", "down", "new"].includes(process.argv[2] ?? "")) {
+  trace("bin", `client verb=${process.argv[2]} → BrokerClient over socket ${socket}`);
   const client = new BrokerClient(new NodeSocketClient(), socket);
   const program = buildProgram(client, agentId, (s) => console.log(s));
 
