@@ -1,4 +1,5 @@
 import type { FileSystem } from "../ports/fs.ts";
+import { trace } from "../obs/trace.ts";
 
 /** The daemon surface the lifecycle drives (a NodeSocketServer-backed daemon). */
 export interface DaemonLike {
@@ -43,10 +44,14 @@ export async function teamUp(
   socket: string,
   deps: LifecycleDeps,
 ): Promise<void> {
+  trace("lifecycle", `teamUp: daemon.start(${socket})`);
   await daemon.start(socket);
+  trace("lifecycle", "teamUp: bootstrapper.up (worktrees → cards → register → spawn)");
   await bootstrapper.up(socket);
   deps.fs.write(deps.pidfile, String(deps.proc.pid));
+  trace("lifecycle", `teamUp: wrote pidfile ${deps.pidfile}=${deps.proc.pid}; staying alive`);
   deps.proc.onShutdown(() => {
+    trace("lifecycle", "shutdown: bootstrapper.down → daemon.stop → cleanup");
     void (async () => {
       try {
         await bootstrapper.down();
@@ -71,8 +76,9 @@ function cleanup(deps: LifecycleDeps): void {
  * clear the pidfile. Returns false when no daemon is recorded.
  */
 export async function teamDown(deps: LifecycleDeps, signal = "SIGTERM"): Promise<boolean> {
-  if (!deps.fs.exists(deps.pidfile)) return false;
+  if (!deps.fs.exists(deps.pidfile)) { trace("lifecycle", "teamDown: no pidfile → no running broker"); return false; }
   const pid = Number(deps.fs.read(deps.pidfile).trim());
+  trace("lifecycle", `teamDown: kill pid=${pid} (${signal}) + cleanup pidfile/socket`);
   deps.proc.kill(pid, signal);
   cleanup(deps);
   return true;

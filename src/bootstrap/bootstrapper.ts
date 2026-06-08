@@ -6,6 +6,7 @@ import { createWorktrees } from "./worktrees.ts";
 import { renderRoleFile, roleFileName, toCard } from "./roles.ts";
 import type { EngineRegistry } from "../engines/index.ts";
 import type { AgentCard } from "../a2a/index.ts";
+import { trace } from "../obs/trace.ts";
 import { dirname, join } from "node:path";
 
 export interface BootstrapDeps {
@@ -27,8 +28,10 @@ export class Bootstrapper {
 
   async up(socketPath: string): Promise<void> {
     const teamDir = this.deps.teamDir ?? ".team";
+    trace("bootstrap", `up: ${this.cfg.agents.length} agents, teamDir=${teamDir}`);
     // git worktree commands must run inside the project repo (base = teamDir's
     // parent), not the cwd `team up` happened to be invoked from.
+    trace("bootstrap", "createWorktrees (git worktree add per declaring agent)");
     createWorktrees(this.cfg, this.deps.git, dirname(teamDir));
     // CAVEAT: two agents sharing a workdir AND the same engine resolve to the
     // same role filename (e.g. CLAUDE.md / AGENTS.md), so the second write
@@ -45,6 +48,7 @@ export class Bootstrapper {
     this.cfg.agents.forEach((a, i) => {
       const card = cards[i]!;
       this.deps.register(card); // populate the broker roster (panes engines never self-register)
+      trace("bootstrap", `register card ${a.id} (role=${a.role} engine=${a.engine}) + write .team/cards/${a.id}.json`);
       this.deps.fs.write(join(teamDir, "cards", `${a.id}.json`), JSON.stringify(card, null, 2));
       const tmplName = a.template ?? a.role;
       const tmpl = this.deps.templates[tmplName] ?? this.deps.templates[a.role] ?? "# {{id}}";
@@ -53,12 +57,15 @@ export class Bootstrapper {
         console.warn(`warning: role file ${roleFilePath} written by multiple agents — last one (${a.id}) wins`);
       }
       roleFilesSeen.add(roleFilePath);
+      trace("bootstrap", `render role file ${roleFilePath} (template=${tmplName})`);
       this.deps.fs.write(roleFilePath, renderRoleFile(tmpl, a));
     });
+    trace("bootstrap", `spawning ${cards.length} agents via runtime`);
     for (const card of cards) {
+      trace("bootstrap", `runtime.spawn ${card.id}`);
       await this.deps.runtime.spawn(card, { config: this.cfg, socketPath });
     }
   }
 
-  async down(): Promise<void> { await this.deps.runtime.teardown(); }
+  async down(): Promise<void> { trace("bootstrap", "down: runtime.teardown"); await this.deps.runtime.teardown(); }
 }
