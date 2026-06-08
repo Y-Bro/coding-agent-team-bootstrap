@@ -1,4 +1,5 @@
 import type { AgentDirectory } from "./registry.ts";
+import { trace } from "../obs/trace.ts";
 
 /** Narrow contract for resolving a `to`/`type` pair to recipient agent ids. */
 export interface MessageRouter {
@@ -17,15 +18,16 @@ export class Router implements MessageRouter {
     const agents = this.registry.all();
     const recipients = new Set<string>();
 
-    if (this.registry.has(to)) recipients.add(to);
+    if (this.registry.has(to)) recipients.add(to);          // direct by id
     for (const a of agents) {
-      if (a.role === to) recipients.add(a.id);
-      if (a.capabilities.includes(to)) recipients.add(a.id);
-      if (a.subscribes.includes(type)) recipients.add(a.id);
+      if (a.role === to) recipients.add(a.id);               // by role
+      if (a.capabilities.includes(to)) recipients.add(a.id); // by capability
+      if (a.subscribes.includes(type)) recipients.add(a.id); // by type subscription
     }
     if (recipients.size === 0) {
       throw new Error(`unknown target: ${to}`);
     }
+    trace("router", `resolve to='${to}' type='${type}' → [${[...recipients].join(", ")}] (id|role|capability|subscription)`);
     return [...recipients];
   }
 }

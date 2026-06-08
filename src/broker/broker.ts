@@ -7,6 +7,7 @@ import type { Transport } from "./transport.ts";
 import type { MessagePublisher } from "./bus.ts";
 import type { Clock } from "../ports/clock.ts";
 import type { IdGenerator } from "../ports/ids.ts";
+import { trace } from "../obs/trace.ts";
 
 /** Log record type marking messages an agent has consumed (the delivery watermark). */
 export const ACK_EVENT_TYPE = "inbox_ack";
@@ -56,11 +57,12 @@ export class Broker implements BrokerDispatch, MessageObserver {
 
   constructor(private deps: BrokerDeps) {}
 
-  register(card: AgentCard): void { this.deps.registry.register(card); }
+  register(card: AgentCard): void { trace("broker", `register ${card.id} (role=${card.role})`); this.deps.registry.register(card); }
   agents(): AgentCard[] { return this.deps.registry.all(); }
 
   async send(input: SendInput): Promise<Message> {
     const recipients = this.deps.router.resolve(input.to, input.type);
+    trace("broker", `send from=${input.from} to=${input.to} type=${input.type}${input.task ? ` task=${input.task}` : ""} → recipients=[${recipients.join(", ") || "none"}]`);
     const m: Message = {
       id: this.deps.ids.next("m"),
       task: input.task,
@@ -73,7 +75,7 @@ export class Broker implements BrokerDispatch, MessageObserver {
     this.record(m, recipients);
     for (const id of recipients) {
       const card = this.deps.registry.get(id);
-      if (card) await this.deps.transport.deliver(card, m);
+      if (card) { trace("broker", `transport.deliver ${m.id} → ${id}`); await this.deps.transport.deliver(card, m); }
     }
     return m;
   }
@@ -84,18 +86,22 @@ export class Broker implements BrokerDispatch, MessageObserver {
    * deliver it over the transport (the broker is the observer, not in the path).
    */
   async observe(m: Message): Promise<void> {
+    trace("broker", `observe ${m.id} (peer-delivered ${m.from}→${m.to}); recording only`);
     this.record(m, this.safeResolve(m.to, m.type));
   }
 
   /** Non-destructive read of this agent's pending messages. */
   peek(agentId: string): Message[] {
-    return [...(this.inboxes.get(agentId) ?? [])];
+    const box = this.inboxes.get(agentId) ?? [];
+    trace("broker", `peek ${agentId} → ${box.length} pending`);
+    return [...box];
   }
 
   /** Mark messages consumed: drop them from the inbox and persist an ack record
    * so the watermark survives a restart (rebuild skips acked ids). */
   ack(agentId: string, ids: string[]): void {
     if (ids.length === 0) return;
+    trace("broker", `ack ${agentId}: consume [${ids.join(", ")}] + persist watermark`);
     const drop = new Set(ids);
     const box = (this.inboxes.get(agentId) ?? []).filter((m) => !drop.has(m.id));
     this.inboxes.set(agentId, box);
@@ -109,6 +115,7 @@ export class Broker implements BrokerDispatch, MessageObserver {
    * already-consumed messages). Acks always follow their messages chronologically,
    * so a single in-order pass is correct. */
   rebuild(): void {
+    trace("broker", "rebuild: replay log → reconstruct inboxes (honoring acks)");
     this.inboxes.clear();
     for (const m of this.deps.store.replay()) {
       if (m.type === ACK_EVENT_TYPE) {
@@ -127,6 +134,7 @@ export class Broker implements BrokerDispatch, MessageObserver {
 
   /** Persist + feed a message and push it into each recipient's inbox (no transport). */
   private record(m: Message, recipients: string[]): void {
+    trace("broker", `record ${m.id} from=${m.from} to=${m.to} type=${m.type} → append log+feed, inbox+=[${recipients.join(", ") || "none"}], publish`);
     this.deps.store.append(m);
     this.deps.feed.append(m);
     for (const id of recipients) this.deliver(id, m);
