@@ -5,7 +5,10 @@ import { FakeCommandRunner } from "../../src/ports/command.ts";
 import { resolveEngines } from "../../src/engines/registry.ts";
 
 const reg = resolveEngines({
-  engines: { mine: { command: "mycli", roleFile: "MINE.md", headlessArgs: ["run"] } },
+  engines: {
+    mine: { command: "mycli", roleFile: "MINE.md", headlessArgs: ["run"] },
+    withargs: { command: "mycli", roleFile: "MINE.md", args: ["--model", "x"], headlessArgs: ["run"] },
+  },
 });
 const req = { role: "writer", id: "w", team: "t", engine: "x" };
 
@@ -26,6 +29,17 @@ test("uses a config-defined engine's command + headlessArgs", async () => {
   await g.generate(req);
   assert.equal(runner.calls[0]!.command, "mycli");
   assert.equal(runner.calls[0]!.args[0], "run");
+});
+
+test("argv preserves order: profile args, then headlessArgs, then the prompt last", async () => {
+  const runner = new FakeCommandRunner({ code: 0, stdout: "X", stderr: "", timedOut: false });
+  const g = new EngineGuidanceGenerator(runner, reg, "withargs");
+  await g.generate(req);
+  const args = runner.calls[0]!.args;
+  // exact order: ["--model", "x", "run", "<prompt>"]
+  assert.deepEqual(args.slice(0, 3), ["--model", "x", "run"]);
+  assert.equal(args.length, 4);
+  assert.ok(args.at(-1)!.includes("writer")); // generated prompt is last
 });
 
 test("returns null without spawning when generator has no headlessArgs", async () => {
