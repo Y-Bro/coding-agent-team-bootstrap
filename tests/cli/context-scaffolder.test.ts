@@ -67,6 +67,17 @@ test("resolves a worktree agent's file under its worktree path", async () => {
   assert.ok(files.has(at("worktrees/w", "CLAUDE.md")));
 });
 
+test("names the file from a config-defined engine's custom roleFile", async () => {
+  const { fs, files } = memFs();
+  const customReg = resolveEngines({
+    engines: { mine: { command: "mycli", roleFile: "CUSTOM.md" } },
+  });
+  const a = [{ id: "c", role: "writer", engine: "mine", subscribes: [] }];
+  await new ContextScaffolder(fs, okGen("G"), customReg, () => {}).scaffold("t", a, base);
+  assert.ok(files.has(at(".", "CUSTOM.md")));
+  assert.ok(files.get(at(".", "CUSTOM.md"))!.startsWith("G\n\n## Team wiring"));
+});
+
 test("does not prefix base onto an already-absolute workdir or worktree path", async () => {
   const { fs, files } = memFs();
   const absAgents = [
