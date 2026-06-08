@@ -373,14 +373,16 @@ export async function runScaffoldCommand(opts: ScaffoldOptions, deps: ScaffoldDe
     agents: wiz.agents.map((a) => ({ ...a, window: plan.windowByAgent[a.id] })),
     layout: plan.layoutByWindow,
   };
-  TeamConfigSchema.parse(cfg); // validate before writing
+  const parsed = TeamConfigSchema.parse(cfg); // validate before writing; capture defaults
   await writeConfigYaml(opts.out, cfg);
 
   // 4) context files
   const base = dirname(opts.out);
+  // Source the generator engine from the validated config (default "claude"),
+  // not a hardcoded literal — so scaffold.generator drives guidance generation.
   const generator: GuidanceGenerator = opts.noGuidance
     ? NULL_GUIDANCE
-    : new EngineGuidanceGenerator(runner, engines, "claude");
+    : new EngineGuidanceGenerator(runner, engines, parsed.scaffold.generator);
   const scaffoldAgents: ScaffoldAgent[] = wiz.agents.map((a) => ({
     id: a.id, role: a.role, engine: a.engine, subscribes: [],
   }));
