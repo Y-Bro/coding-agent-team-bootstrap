@@ -2,11 +2,11 @@
 import type { EngineProfile } from "./profile.ts";
 
 export const BUILTIN_ENGINES: EngineProfile[] = [
-  { name: "claude",       command: "claude",       roleFile: "CLAUDE.md",     kind: "repl" },
-  { name: "codex",        command: "codex",        roleFile: "AGENTS.md",     kind: "repl" },
-  { name: "cursor-agent", command: "cursor-agent", roleFile: "AGENTS.md",     kind: "repl" },
-  { name: "opencode",     command: "opencode",     roleFile: "AGENTS.md",     kind: "repl" },
-  { name: "gemini",       command: "gemini",       roleFile: "GEMINI.md",     kind: "repl" },
+  { name: "claude",       command: "claude",       roleFile: "CLAUDE.md",      kind: "repl", headlessArgs: ["-p"] },
+  { name: "codex",        command: "codex",        roleFile: "AGENTS.md",      kind: "repl", headlessArgs: ["exec"] },
+  { name: "cursor-agent", command: "cursor-agent", roleFile: "AGENTS.md",      kind: "repl", headlessArgs: ["-p"] },
+  { name: "opencode",     command: "opencode",     roleFile: "AGENTS.md",      kind: "repl" },
+  { name: "gemini",       command: "gemini",       roleFile: "GEMINI.md",      kind: "repl" },
   { name: "aider",        command: "aider",        roleFile: "CONVENTIONS.md", kind: "repl" },
 ];
 
