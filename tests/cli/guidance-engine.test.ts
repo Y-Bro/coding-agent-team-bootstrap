@@ -67,3 +67,19 @@ test("returns null when the generator engine is unknown to the registry", async 
   assert.equal(await g.generate(req), null);
   assert.equal(runner.calls.length, 0);
 });
+
+test("guidance generation uses a 120s timeout", async () => {
+  const runner = new FakeCommandRunner({ code: 0, stdout: "x", stderr: "", timedOut: false });
+  const g = new EngineGuidanceGenerator(runner, resolveEngines({}), "claude");
+  await g.generate({ role: "r", id: "i", team: "t", engine: "claude" });
+  assert.equal(runner.calls[0]!.opts.timeoutMs, 120_000);
+});
+
+test("the generation prompt asks the model to stay within the line limit", async () => {
+  const runner = new FakeCommandRunner({ code: 0, stdout: "x", stderr: "", timedOut: false });
+  const g = new EngineGuidanceGenerator(runner, resolveEngines({}), "claude");
+  await g.generate({ role: "r", id: "i", team: "t", engine: "claude" });
+  const prompt = runner.calls[0]!.args.at(-1)!; // prompt is the last argv element
+  assert.match(prompt, /180/);
+  assert.match(prompt, /at most ~180 lines/);
+});

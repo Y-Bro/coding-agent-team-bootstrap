@@ -23,6 +23,7 @@ import { StallPolicy } from "./broker/policies/stall.ts";
 import { DeadLetterPolicy } from "./broker/policies/dead-letter.ts";
 import { DashboardServer } from "./dashboard/server.ts";
 import type { AgentCard, Message } from "./a2a/index.ts";
+import { DEFAULT_MESSAGE_TYPES } from "./a2a/index.ts";
 import { selectRuntime, effectiveRuntime } from "./runtime/select.ts";
 import type { RuntimeKind } from "./runtime/composite.ts";
 import { ServersRuntime, type AgentLink } from "./runtime/servers/servers.ts";
@@ -384,13 +385,23 @@ export async function runScaffoldCommand(opts: ScaffoldOptions, deps: ScaffoldDe
     wiz.agents.map((a) => ({ id: a.id, role: a.role, engine: a.engine })),
   );
 
+  // Hub-and-spoke: the orchestrator (first agent, index 0 — the cfg.agents[0]
+  // convention DeadLetterPolicy already uses) hears ALL message types; every
+  // other agent subscribes to none, so type-based fan-out flows through the hub.
+  const subsFor = (i: number): string[] => (i === 0 ? [...DEFAULT_MESSAGE_TYPES] : []);
+
   // 3) assemble config (fills existing window/layout fields; root anchors here)
   const cfg: Record<string, unknown> = {
     ...wiz,
     root: ".",
     // Each agent gets its own workdir shared/<id> so same-engine agents don't
     // collide on one roleFile; the team still operates on the whole project (root).
-    agents: wiz.agents.map((a) => ({ ...a, workdir: `shared/${a.id}`, window: plan.windowByAgent[a.id] })),
+    agents: wiz.agents.map((a, i) => ({
+      ...a,
+      workdir: `shared/${a.id}`,
+      window: plan.windowByAgent[a.id],
+      subscribes: subsFor(i),
+    })),
     layout: plan.layoutByWindow,
   };
   const parsed = TeamConfigSchema.parse(cfg); // validate before writing; capture defaults
@@ -403,8 +414,9 @@ export async function runScaffoldCommand(opts: ScaffoldOptions, deps: ScaffoldDe
   const generator: GuidanceGenerator = opts.noGuidance
     ? NULL_GUIDANCE
     : new EngineGuidanceGenerator(runner, engines, parsed.scaffold.generator);
-  const scaffoldAgents: ScaffoldAgent[] = wiz.agents.map((a) => ({
-    id: a.id, role: a.role, engine: a.engine, subscribes: [],
+  const scaffoldAgents: ScaffoldAgent[] = wiz.agents.map((a, i) => ({
+    id: a.id, role: a.role, engine: a.engine,
+    subscribes: subsFor(i),
     workdir: `shared/${a.id}`,
   }));
   await new ContextScaffolder(fs, generator, engines, (m) => console.warn(m))
