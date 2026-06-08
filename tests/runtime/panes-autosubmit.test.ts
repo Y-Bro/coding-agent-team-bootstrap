@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { PanesRuntime } from "../../src/runtime/panes.ts";
+import { resolveEngines } from "../../src/engines/index.ts";
 
 // Records tmux argv in order. new-session/new-window/split-window must return an
 // id so placePane works; everything else returns "".
@@ -14,21 +15,22 @@ class FakeTmux {
     return "";
   }
 }
-// Minimal fake sleeper recording sleep order relative to tmux send-keys calls.
+// Minimal fakes recording sleep order + delay relative to tmux send-keys calls.
 function fakes() {
   const tmux = new FakeTmux();
   const events: string[] = [];
-  const sleeper = { sleep: async (_ms: number) => { events.push("sleep"); } };
+  const sleeps: number[] = [];
+  const sleeper = { sleep: async (ms: number) => { sleeps.push(ms); events.push("sleep"); } };
   const origRun = tmux.run.bind(tmux);
   tmux.run = (args: string[]) => {
     if (args[0] === "send-keys") events.push("send-keys:" + (args.includes("Enter") ? "enter" : "text"));
     return origRun(args);
   };
-  return { tmux, sleeper, events };
+  return { tmux, sleeper, events, sleeps };
 }
 
-test("wake types text, sleeps, then sends Enter separately", async () => {
-  const { tmux, sleeper, events } = fakes();
+test("wake types text, sleeps 400ms, then sends Enter separately", async () => {
+  const { tmux, sleeper, events, sleeps } = fakes();
   // PanesRuntime(tmux, session, engines, sleeper) — match the real constructor order
   const rt = new PanesRuntime(tmux as any, "s", { get: () => undefined, list: () => [] } as any, sleeper as any);
   await rt.wake("lead", "new mail");
@@ -37,4 +39,31 @@ test("wake types text, sleeps, then sends Enter separately", async () => {
   assert.ok(events.includes("send-keys:enter"));
   assert.ok(idx("send-keys:text") < idx("sleep"));
   assert.ok(idx("sleep") < idx("send-keys:enter"));
+  assert.deepEqual(sleeps, [400]); // the configured SUBMIT_DELAY_MS
+});
+
+test("spawn (launch) types the launch command, sleeps 400ms, then sends Enter separately", async () => {
+  const { tmux, sleeper, events, sleeps } = fakes();
+  const rt = new PanesRuntime(tmux as any, "s", resolveEngines({}), sleeper as any);
+  const card = {
+    id: "lead", role: "lead", cli: "claude", engine: "claude",
+    capabilities: [], skills: [], workdir: ".", subscribes: [],
+  };
+  const ctx = { config: { agents: [{ id: "lead" }], layout: {} }, socketPath: "/tmp/s.sock" };
+  await rt.spawn(card as any, ctx as any);
+
+  // same discipline for the launch command: text -> sleep -> Enter, separate calls
+  const idx = (s: string) => events.indexOf(s);
+  assert.ok(events.includes("send-keys:text"));
+  assert.ok(events.includes("send-keys:enter"));
+  assert.ok(idx("send-keys:text") < idx("sleep"));
+  assert.ok(idx("sleep") < idx("send-keys:enter"));
+  assert.deepEqual(sleeps, [400]);
+
+  // the launch command rode in the literal-text (-l) send-keys, NOT the Enter call
+  const sends = tmux.calls.filter((c) => c[0] === "send-keys");
+  const textSend = sends.find((c) => c.includes("-l"))!;
+  const enterSend = sends.find((c) => c.includes("Enter"))!;
+  assert.ok(textSend.join(" ").includes("claude"), "launch command typed literally");
+  assert.ok(!enterSend.join(" ").includes("claude"), "Enter is a separate, text-free send-keys");
 });
