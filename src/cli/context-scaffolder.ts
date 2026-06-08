@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { resolve } from "node:path";
 import type { FileSystem } from "../ports/fs.ts";
 import type { EngineRegistry } from "../engines/index.ts";
 import type { GuidanceGenerator } from "../ports/guidance.ts";
@@ -51,7 +51,9 @@ export class ContextScaffolder {
       const profile = this.engines.get(a.engine);
       const roleFile = profile?.roleFile ?? "CONTEXT.md";
       const dir = a.worktree?.path ?? a.workdir ?? ".";
-      const target = join(base, dir, roleFile);
+      // resolve (not join) so an already-absolute workdir/worktree path is NOT
+      // re-prefixed with base — matching resolveConfigPaths semantics.
+      const target = resolve(base, dir, roleFile);
 
       if (this.fs.exists(target)) {
         this.warn(`context file exists, skipping: ${target}`);
