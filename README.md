@@ -124,9 +124,25 @@ team new --force    # overwrite an existing team.yaml (otherwise you're prompted
 exists it prompts before overwriting (default **no**), `--yes` keeps the existing
 file untouched, and `--force` overwrites unconditionally.
 
-For each agent, `team new` writes the context file its engine reads on boot —
-named by that engine's role file (`CLAUDE.md` for claude, `AGENTS.md` for
-codex/cursor-agent, or a custom engine's `roleFile`). Each file gets a
+It produces this layout:
+
+```
+project-root/
+  team.yaml          (root: .)
+  shared/<agent>/    one folder per agent, holding that agent's context md
+```
+
+Each agent's `workdir` is `shared/<id>`, so its context md is loaded from its
+**own** folder — two agents on the same engine never collide on one `CLAUDE.md`,
+and every agent gets its own generated guidance. The agent still operates on the
+whole project: the engine's upward directory-walk applies the project-root
+context, and the `workdir` does not sandbox edits (an agent can change files
+anywhere in the repo). `.team/` and runtime state live at the project root
+(`root: .`).
+
+For each agent, `team new` writes the context file its engine reads on boot into
+`shared/<id>/` — named by that engine's role file (`CLAUDE.md` for claude,
+`AGENTS.md` for codex/cursor-agent, or a custom engine's `roleFile`). Each file gets a
 deterministic **team-wiring footer** (who you are, your teammates, the message
 types you receive, and the `team inbox` / `team send` commands). When a generator
 engine is available it also drafts role-appropriate guidance above the footer;

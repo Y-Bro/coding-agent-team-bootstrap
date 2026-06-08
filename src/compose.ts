@@ -388,7 +388,9 @@ export async function runScaffoldCommand(opts: ScaffoldOptions, deps: ScaffoldDe
   const cfg: Record<string, unknown> = {
     ...wiz,
     root: ".",
-    agents: wiz.agents.map((a) => ({ ...a, window: plan.windowByAgent[a.id] })),
+    // Each agent gets its own workdir shared/<id> so same-engine agents don't
+    // collide on one roleFile; the team still operates on the whole project (root).
+    agents: wiz.agents.map((a) => ({ ...a, workdir: `shared/${a.id}`, window: plan.windowByAgent[a.id] })),
     layout: plan.layoutByWindow,
   };
   const parsed = TeamConfigSchema.parse(cfg); // validate before writing; capture defaults
@@ -403,6 +405,7 @@ export async function runScaffoldCommand(opts: ScaffoldOptions, deps: ScaffoldDe
     : new EngineGuidanceGenerator(runner, engines, parsed.scaffold.generator);
   const scaffoldAgents: ScaffoldAgent[] = wiz.agents.map((a) => ({
     id: a.id, role: a.role, engine: a.engine, subscribes: [],
+    workdir: `shared/${a.id}`,
   }));
   await new ContextScaffolder(fs, generator, engines, (m) => console.warn(m))
     .scaffold(wiz.name, scaffoldAgents, base);
