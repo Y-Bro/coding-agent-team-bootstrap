@@ -3,6 +3,9 @@ import type { FileSystem } from "../ports/fs.ts";
 import type { EngineRegistry } from "../engines/index.ts";
 import type { GuidanceGenerator } from "../ports/guidance.ts";
 
+/** Hard cap on every generated context file (guidance + blank + footer). */
+const MAX_MD_LINES = 200;
+
 export interface ScaffoldAgent {
   id: string;
   role: string;
@@ -65,7 +68,12 @@ export class ContextScaffolder {
         this.warn(`guidance unavailable for ${a.id}; wrote wiring-only ${target}`);
         this.fs.write(target, footer);
       } else {
-        this.fs.write(target, `${text}\n\n${footer}`);
+        // Trim the guidance so guidance + blank separator + footer stays within
+        // the 200-line cap; the wiring footer is always preserved intact.
+        const footerLines = footer.split("\n").length;
+        const budget = Math.max(0, MAX_MD_LINES - footerLines - 1); // -1 for the blank separator
+        const trimmed = text.split("\n").slice(0, budget).join("\n");
+        this.fs.write(target, `${trimmed}\n\n${footer}`);
       }
     }
   }
