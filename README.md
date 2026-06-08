@@ -148,7 +148,16 @@ types you receive, and the `team inbox` / `team send` commands). When a generato
 engine is available it also drafts role-appropriate guidance above the footer;
 if generation is unavailable or fails, the file falls back to wiring-only with a
 warning — the scaffold never aborts. Existing context files are never
-overwritten (they're skipped with a warning).
+overwritten (they're skipped with a warning). Every generated context file is
+capped at **200 lines** (the guidance is trimmed to fit; the wiring footer is
+always kept), so an over-eager generator can't bloat an agent's boot context.
+
+**Hub-and-spoke by default.** The scaffolded team is wired through an
+orchestrator: the **first agent** (`cfg.agents[0]` — put your orchestrator first)
+subscribes to *all* message types, and every other agent subscribes to none. So
+type-based fan-out flows Agent → orchestrator → Agent rather than broadcasting to
+everyone. Direct addressing (`team send --to <id>`) always works regardless of
+subscriptions; edit `subscribes` in `team.yaml` to change the topology per team.
 
 Config knobs:
 
