@@ -3,6 +3,7 @@ import type { TmuxCommands } from "../ports/tmux.ts";
 import type { AgentCard } from "../a2a/index.ts";
 import type { EngineRegistry } from "../engines/index.ts";
 import type { Sleeper } from "../ports/sleeper.ts";
+import { trace } from "../obs/trace.ts";
 
 const DEFAULT_LAYOUT = "even-horizontal";
 /**
@@ -34,8 +35,10 @@ export class PanesRuntime implements Runtime {
    * (codex, cursor-agent) reliably auto-submit. `-l` keeps the text literal.
    */
   private async typeAndSubmit(target: string, text: string): Promise<void> {
+    trace("panes", `typeAndSubmit ${target}: send-keys -l "${text.slice(0, 60)}${text.length > 60 ? "…" : ""}"`);
     this.tmux.run(["send-keys", "-t", target, "-l", text]);
     await this.sleeper.sleep(SUBMIT_DELAY_MS);
+    trace("panes", `typeAndSubmit ${target}: send-keys Enter (after ${SUBMIT_DELAY_MS}ms)`);
     this.tmux.run(["send-keys", "-t", target, "Enter"]);
   }
 
@@ -48,18 +51,22 @@ export class PanesRuntime implements Runtime {
     // Agents sharing a `window` value share one tmux window (each its own pane);
     // an omitted window defaults to the agent id → one window per agent.
     const windowName = ctx.config.agents.find((a) => a.id === agent.id)?.window ?? agent.id;
+    trace("panes", `spawn ${agent.id}: engine=${agent.engine} window=${windowName} workdir=${agent.workdir}`);
     const paneId = this.placePane(windowName, agent.workdir, ctx.config.layout);
     this.paneIds.set(agent.id, paneId);
+    trace("panes", `spawn ${agent.id}: pane=${paneId}; launching`);
     await this.typeAndSubmit(paneId, launch);
   }
 
   async wake(agentId: string, summary: string): Promise<void> {
     // Target the stable pane id — tmux automatic-rename breaks session:name.
     const target = this.paneIds.get(agentId) ?? `${this.session}:${agentId}`;
+    trace("panes", `wake ${agentId} → pane ${target}: "${summary}"`);
     await this.typeAndSubmit(target, `# ▶ mail — ${summary} — run: team inbox`);
   }
 
   async teardown(): Promise<void> {
+    trace("panes", `teardown: kill-session ${this.session}`);
     this.tmux.run(["kill-session", "-t", this.session]);
   }
 
@@ -74,12 +81,15 @@ export class PanesRuntime implements Runtime {
   private placePane(windowName: string, workdir: string, layout: Record<string, string>): string {
     const windowId = this.windowIds.get(windowName);
     if (windowId !== undefined) {
+      trace("panes", `placePane '${windowName}': split-window in ${windowId} + select-layout ${layout[windowName] ?? DEFAULT_LAYOUT}`);
       const paneId = this.tmux.run(
         ["split-window", "-t", windowId, "-c", workdir, "-P", "-F", "#{pane_id}"],
       ).trim();
       this.tmux.run(["select-layout", "-t", windowId, layout[windowName] ?? DEFAULT_LAYOUT]);
       return paneId;
     }
+    const verb = this.sessionCreated ? "new-window" : "new-session";
+    trace("panes", `placePane '${windowName}': ${verb} (first pane of window)`);
     const capture = ["-P", "-F", "#{window_id} #{pane_id}"];
     const out = this.sessionCreated
       ? this.tmux.run(["new-window", "-t", this.session, "-n", windowName, "-c", workdir, ...capture])

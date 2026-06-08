@@ -3,6 +3,7 @@ import type { Runtime } from "./runtime.ts";
 import type { TmuxCommands } from "../ports/tmux.ts";
 import type { EngineRegistry } from "../engines/index.ts";
 import type { Sleeper } from "../ports/sleeper.ts";
+import { trace } from "../obs/trace.ts";
 import { PanesRuntime } from "./panes.ts";
 import { CompositeRuntime, type RuntimeKind } from "./composite.ts";
 import { assertServerEngine } from "./servers/servers.ts";
@@ -39,10 +40,11 @@ export function selectRuntime(
     }
   }
 
-  if (needsServers && !needsPanes) return makeServersRuntime();
-  if (needsPanes && !needsServers) return new PanesRuntime(tmux, cfg.name, engines, sleeper);
+  if (needsServers && !needsPanes) { trace("select", "runtime=servers (all agents on A2A servers)"); return makeServersRuntime(); }
+  if (needsPanes && !needsServers) { trace("select", `runtime=panes (tmux session '${cfg.name}')`); return new PanesRuntime(tmux, cfg.name, engines, sleeper); }
 
   // mixed: route per agent by its effective runtime (resolved by id from config).
+  trace("select", "runtime=composite (mixed panes+servers, routed per agent)");
   const kindById = new Map(cfg.agents.map((a) => [a.id, effectiveRuntime(a, cfg)] as const));
   return new CompositeRuntime(
     { panes: new PanesRuntime(tmux, cfg.name, engines, sleeper), servers: makeServersRuntime() },
