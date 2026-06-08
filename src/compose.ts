@@ -45,6 +45,7 @@ import { runDoctor, type DoctorReport } from "./bootstrap/doctor.ts";
 import { runWizard, writeConfigYaml } from "./cli/wizard.ts";
 import { formatDoctorReport } from "./cli/doctor-cmd.ts";
 import { TeamConfigSchema } from "./config/schema.ts";
+import { trace } from "./obs/trace.ts";
 import { LayoutPlanner } from "./cli/layout-planner.ts";
 import { ContextScaffolder, type ScaffoldAgent } from "./cli/context-scaffolder.ts";
 import { EngineGuidanceGenerator } from "./cli/guidance-engine.ts";
@@ -110,6 +111,7 @@ function a2aLink(discovery: DiscoveryProvider, broker: Broker, clock: SystemCloc
 }
 
 export function buildContainer(cfg: TeamConfig, templates: Record<string, string>) {
+  trace("compose", `buildContainer team=${cfg.name} delivery=${cfg.delivery} bus=${cfg.bus.kind}`);
   const fs = new NodeFileSystem();
   const registry = new AgentRegistry();
   const engines = resolveEngines(cfg);
@@ -122,6 +124,7 @@ export function buildContainer(cfg: TeamConfig, templates: Record<string, string
   // (absolute socket under base/.team) keeps its messages/feed/cards together.
   const teamDir = dirname(cfg.broker.socket);
   const store = new JsonlStore(fs, join(teamDir, "messages.jsonl"));
+  trace("compose", `ports: fs/registry/clock/ids/sleeper; store=${join(teamDir, "messages.jsonl")}`);
   // Observer fan-out is ALWAYS constructed (config-selected) so task projection
   // and sweep work headless; the dashboard becomes one more subscriber.
   const bus = makeBus(cfg.bus.kind);
@@ -142,6 +145,7 @@ export function buildContainer(cfg: TeamConfig, templates: Record<string, string
   const kinds = new Set(kindById.values());
   const needsServers = kinds.has("servers");
   const needsPanes = kinds.has("panes");
+  trace("compose", `runtime kinds=${[...kinds].join("+")} (panes=${needsPanes} servers=${needsServers})`);
 
   // Direct delivery is peer-to-peer over A2A, so EVERY agent must run an A2A
   // server (v3-m1 invariant). In a mixed team a pane recipient has no A2A
@@ -194,8 +198,10 @@ export function buildContainer(cfg: TeamConfig, templates: Record<string, string
     needsServers && needsPanes
       ? new CompositeTransport({ panes: socketTransport, servers: a2aTransport! }, (r) => kindOf(r.id))
       : needsServers ? a2aTransport! : socketTransport;
+  trace("compose", `transport=${needsServers && needsPanes ? "composite(socket+a2a)" : needsServers ? "a2a" : "socket"}`);
 
   const broker = makeBroker(transport);
+  trace("compose", "broker built (store+registry+router+feed+transport+bus)");
 
   // Task projection: derive A2A task state from real traffic by observing the bus
   // (observer only, never in the delivery path). rebuild() restores state from the
@@ -203,6 +209,7 @@ export function buildContainer(cfg: TeamConfig, templates: Record<string, string
   const taskMachine = new TaskMachine(store, clock, ids);
   const taskProjector = new TaskProjector(taskMachine);
   bus.subscribe((m) => taskProjector.handle(m));
+  trace("compose", "task projector subscribed to bus; rebuilding task state from log");
   taskMachine.rebuild();
 
   // Liveness sweep: one Clock/Sleeper loop, two policies. `emit` appends to the
@@ -217,6 +224,7 @@ export function buildContainer(cfg: TeamConfig, templates: Record<string, string
       new DeadLetterPolicy({ store, deadLetterMs: cfg.timers.deadLetterMs, lead, emit, ids, isoOf }),
     ],
   });
+  trace("compose", `sweep built: stall=${cfg.timers.stallMs}ms deadLetter=${cfg.timers.deadLetterMs}ms interval=${cfg.timers.sweepIntervalMs}ms lead=${lead}`);
 
   // The servers runtime's link registers spawned agents with THIS broker.
   const makeServersRuntime = needsServers
@@ -228,12 +236,14 @@ export function buildContainer(cfg: TeamConfig, templates: Record<string, string
   // selectRuntime validates server-engine eligibility and builds panes/servers/
   // composite as the team requires; the socket transport's lazy waker now resolves.
   runtime = selectRuntime(cfg, new NodeTmux(), engines, makeServersRuntime, sleeper);
+  trace("compose", "runtime selected (waker now resolves)");
 
   // v3 COEXIST (Q1): in direct mode the sender delivers peer-to-peer and the
   // broker only observes. Same-process wiring posts the observer copy in-process;
   // a separate-process agent uses the message/observe socket RPC (BrokerClient).
   let messenger: Messenger | undefined;
   if (cfg.delivery === "direct") {
+    trace("compose", "delivery=direct → DirectMessenger (peer-to-peer A2A; broker observes only)");
     messenger = new DirectMessenger({
       directory: registry, router: new Router(registry), endpoints: endpoints!,
       observer: broker, clock, ids,
@@ -241,6 +251,7 @@ export function buildContainer(cfg: TeamConfig, templates: Record<string, string
   }
 
   const daemon = new BrokerDaemon(broker, new NodeSocketServer());
+  trace("compose", "daemon + bootstrapper built; container ready");
   const bootstrapper = new Bootstrapper(cfg, {
     runtime, git: new NodeGit(), fs, engines, templates, teamDir,
     // Stamp the reachable url once; the bootstrapper uses the same stamped card
@@ -252,6 +263,7 @@ export function buildContainer(cfg: TeamConfig, templates: Record<string, string
   // Opt-in read-only dashboard, served from the broker process on its own port.
   let dashboard: { server: DashboardServer; port: number } | undefined;
   if (cfg.dashboard.enabled) {
+    trace("compose", `dashboard enabled on port ${cfg.dashboard.port} (read-only bus subscriber)`);
     const server = new DashboardServer({ server: new NodeHttpServer(), store, registry, subscriber: bus });
     server.register();
     dashboard = { server, port: cfg.dashboard.port };
@@ -348,6 +360,7 @@ const NULL_GUIDANCE: GuidanceGenerator = { async generate() { return null; } };
  * which CLIs happen to be on PATH.
  */
 export async function runScaffoldCommand(opts: ScaffoldOptions, deps: ScaffoldDeps = {}): Promise<{ out: string; wantsUp: boolean }> {
+  trace("scaffold", `runScaffoldCommand out=${opts.out} noGuidance=${!!opts.noGuidance} force=${!!opts.force} yes=${!!opts.yes}`);
   const which = new NodeWhich();
   const engines = resolveEngines({});
   const replEngines = engines.list().filter((e) => (e.kind ?? "repl") === "repl");
@@ -362,6 +375,7 @@ export async function runScaffoldCommand(opts: ScaffoldOptions, deps: ScaffoldDe
   // existing config by short-circuiting in bin before we get here.)
   if (fs.exists(opts.out) && !opts.force) {
     const overwrite = await prompter.confirm(`${opts.out} already exists — overwrite it?`, false);
+    trace("scaffold", `existing config at ${opts.out}; overwrite=${overwrite}`);
     if (!overwrite) {
       if (prompter instanceof NodePrompter) prompter.close();
       console.log(`Kept existing ${opts.out}; nothing written.`);
@@ -381,9 +395,12 @@ export async function runScaffoldCommand(opts: ScaffoldOptions, deps: ScaffoldDe
   }
 
   // 1) team shape + engines
+  trace("scaffold", "step 1/5: runWizard (name, runtime, team shape, engine per agent)");
   const wiz = await runWizard({ prompter, engines, available });
+  trace("scaffold", `wizard → name=${wiz.name} runtime=${wiz.runtime} agents=[${wiz.agents.map((a) => `${a.id}:${a.engine}`).join(", ")}]`);
 
   // 2) windows + layout
+  trace("scaffold", "step 2/5: LayoutPlanner (window per agent + per-window layout)");
   const plan = await new LayoutPlanner(prompter).plan(
     wiz.agents.map((a) => ({ id: a.id, role: a.role, engine: a.engine })),
   );
@@ -407,8 +424,10 @@ export async function runScaffoldCommand(opts: ScaffoldOptions, deps: ScaffoldDe
     })),
     layout: plan.layoutByWindow,
   };
+  trace("scaffold", `step 3/5: assemble config (root='.', hub=${wiz.agents[0]?.id} hears all types)`);
   const parsed = TeamConfigSchema.parse(cfg); // validate before writing; capture defaults
   await writeConfigYaml(opts.out, cfg);
+  trace("scaffold", `wrote ${opts.out}`);
 
   // 4) context files
   const base = dirname(opts.out);
@@ -422,6 +441,7 @@ export async function runScaffoldCommand(opts: ScaffoldOptions, deps: ScaffoldDe
     subscribes: subsFor(i),
     workdir: `shared/${a.id}`,
   }));
+  trace("scaffold", `step 4/5: ContextScaffolder generator=${opts.noGuidance ? "none(wiring-only)" : parsed.scaffold.generator} base=${base}`);
   await new ContextScaffolder(fs, generator, engines, (m) => console.warn(m))
     .scaffold(wiz.name, scaffoldAgents, base);
 
@@ -429,6 +449,7 @@ export async function runScaffoldCommand(opts: ScaffoldOptions, deps: ScaffoldDe
   // dispatch actually starts the team when wantsUp; on no/--yes we leave the user
   // the actionable command (the same string runInitCommand prints).
   const wantsUp = opts.yes ? false : await prompter.confirm("Bring the team up now?", false);
+  trace("scaffold", `step 5/5: wantsUp=${wantsUp}`);
   if (prompter instanceof NodePrompter) prompter.close();
   if (!wantsUp) console.log(`Run \`TEAM_CONFIG=${opts.out} team up\` to start the team.`);
   return { out: opts.out, wantsUp };
