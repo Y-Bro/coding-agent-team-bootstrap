@@ -27,4 +27,13 @@ test("first agent (orchestrator) subscribes to all types; others subscribe to no
   const a1 = cfg.agents.find((a: any) => a.id === "a1");
   assert.deepEqual([...boss.subscribes].sort(), [...DEFAULT_MESSAGE_TYPES].sort());
   assert.deepEqual(a1.subscribes, []);
+
+  // The scaffoldAgents side must match: the orchestrator's wiring footer lists
+  // the default types it receives; a spoke's footer says "(none)". noGuidance
+  // makes these footer-only files.
+  const bossMd = readFileSync(join(dir, "shared/boss/CLAUDE.md"), "utf8");
+  assert.match(bossMd, /## Team wiring/);
+  assert.match(bossMd, new RegExp(`You receive messages of type: ${[...DEFAULT_MESSAGE_TYPES].join(", ")}\\.`));
+  const a1Md = readFileSync(join(dir, "shared/a1/CLAUDE.md"), "utf8");
+  assert.match(a1Md, /You receive messages of type: \(none\)\./);
 });
