@@ -47,10 +47,10 @@ export class NodeCommandRunner implements CommandRunner {
 }
 
 export class FakeCommandRunner implements CommandRunner {
-  readonly calls: { command: string; args: string[] }[] = [];
+  readonly calls: { command: string; args: string[]; opts: CommandOptions }[] = [];
   constructor(private result: CommandResult) {}
-  async run(command: string, args: string[], _opts: CommandOptions): Promise<CommandResult> {
-    this.calls.push({ command, args });
+  async run(command: string, args: string[], opts: CommandOptions): Promise<CommandResult> {
+    this.calls.push({ command, args, opts });
     return this.result;
   }
 }

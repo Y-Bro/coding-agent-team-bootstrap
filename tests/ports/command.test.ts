@@ -20,5 +20,5 @@ test("FakeCommandRunner returns its scripted result and records the call", async
   const r = new FakeCommandRunner({ code: 0, stdout: "GUIDE", stderr: "", timedOut: false });
   const res = await r.run("claude", ["-p", "prompt"], {});
   assert.equal(res.stdout, "GUIDE");
-  assert.deepEqual(r.calls[0], { command: "claude", args: ["-p", "prompt"] });
+  assert.deepEqual(r.calls[0], { command: "claude", args: ["-p", "prompt"], opts: {} });
 });
