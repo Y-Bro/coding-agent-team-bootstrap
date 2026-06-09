@@ -25,6 +25,9 @@ export class BrokerDaemon {
 
   private async handle(req: Request): Promise<Response> {
     try {
+      if (!req || typeof (req as { method?: unknown }).method !== "string") {
+        return { ok: false, error: "invalid request: missing method" };
+      }
       switch (req.method) {
         case "agent/register":
           this.broker.register(req.params.card);

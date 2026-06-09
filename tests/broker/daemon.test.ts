@@ -60,3 +60,21 @@ test("inbox/peek then inbox/ack: the second peek is empty (round-trip)", async (
   const again = await server.call({ method: "inbox/peek", params: { agentId: "writer" } });
   assert.equal((again.result as Message[]).length, 0);
 });
+
+test("daemon returns a structured error for an invalid request shape (missing method)", async () => {
+  const fs = new MemoryFs();
+  const registry = new AgentRegistry();
+  const broker = new Broker({
+    store: new JsonlStore(fs, ".team/messages.jsonl"),
+    registry, router: new Router(registry),
+    feed: new FeedRenderer(fs, ".team/feed.md"),
+    transport: new NoopTransport(), clock: new FixedClock(), ids: new SeqIds(),
+  });
+  const server = new CaptureServer();
+  const daemon = new BrokerDaemon(broker, server);
+  await daemon.start(".team/broker.sock");
+
+  const res = await server.call({}); // no method field
+  assert.equal(res.ok, false);
+  assert.match(res.error, /missing method/);
+});

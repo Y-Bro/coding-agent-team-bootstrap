@@ -71,11 +71,34 @@ export class Broker implements BrokerDispatch, MessageObserver {
       ts: this.deps.clock.isoNow(),
     };
     this.record(m, recipients);
+    await this.deliverAll(m, recipients);
+    return m;
+  }
+
+  /**
+   * Emit a fully-formed broker-internal message (e.g. a sweep policy flag /
+   * escalation) through the SAME path as a normal send, so it is visible in
+   * team inbox + feed (and wakes the recipient), not just the durable log.
+   */
+  async emitInternal(m: Message): Promise<void> {
+    const recipients = this.safeResolve(m.to, m.type);
+    this.record(m, recipients);
+    await this.deliverAll(m, recipients);
+  }
+
+  /** Best-effort wake/forward to each recipient over the transport. */
+  private async deliverAll(m: Message, recipients: string[]): Promise<void> {
     for (const id of recipients) {
       const card = this.deps.registry.get(id);
-      if (card) await this.deps.transport.deliver(card, m);
+      if (!card) continue;
+      try {
+        await this.deps.transport.deliver(card, m);
+      } catch (e) {
+        // At-least-once: the message is already in the inbox (source of truth);
+        // a failed wake is best-effort and must not abort the send or other recipients.
+        console.error(`deliver to ${id} failed: ${e instanceof Error ? e.message : e}`);
+      }
     }
-    return m;
   }
 
   /**

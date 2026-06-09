@@ -18,6 +18,18 @@ test("append writes one JSONL line per message and replay rebuilds order", () =>
   assert.deepEqual(all.map((m) => m.id), ["m1", "m2"]);
 });
 
+test("replay skips a corrupt JSONL line and returns the valid messages", () => {
+  const fs = new MemoryFs();
+  const path = ".team/messages.jsonl";
+  const good1 = JSON.stringify(msg("m1"));
+  const good2 = JSON.stringify(msg("m2"));
+  // a truncated/corrupt middle line between two valid messages
+  fs.write(path, good1 + "\n" + "{ truncated" + "\n" + good2 + "\n");
+  const store = new JsonlStore(fs, path);
+  const out = store.replay();
+  assert.deepEqual(out.map((m) => m.id), ["m1", "m2"]);
+});
+
 test("replay on a fresh store with no file returns empty", () => {
   const store = new JsonlStore(new MemoryFs(), ".team/messages.jsonl");
   assert.deepEqual(store.replay(), []);

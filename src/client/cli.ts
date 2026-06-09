@@ -16,9 +16,13 @@ export function buildProgram(client: ClientLike, agentId: string, print: (s: str
     .requiredOption("--to <target>")
     .requiredOption("--type <type>")
     .option("--task <id>")
-    .argument("<body>")
-    .action(async (body: string, opts: { to: string; type: string; task?: string }) => {
-      await client.send({ from: agentId, to: opts.to, type: opts.type, task: opts.task, parts: [{ kind: "text", text: body }] });
+    .option("--text <text>")
+    .argument("[body]")
+    .action(async (body: string | undefined, opts: { to: string; type: string; task?: string; text?: string }) => {
+      if (body !== undefined && opts.text !== undefined) throw new Error("provide message text once: positional OR --text, not both");
+      const text = body ?? opts.text;
+      if (text === undefined) throw new Error("message text required: pass a positional body or --text");
+      await client.send({ from: agentId, to: opts.to, type: opts.type, task: opts.task, parts: [{ kind: "text", text }] });
       print(`sent ${opts.type} → ${opts.to}`);
     });
 

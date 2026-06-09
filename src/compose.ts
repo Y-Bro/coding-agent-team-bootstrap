@@ -205,9 +205,10 @@ export function buildContainer(cfg: TeamConfig, templates: Record<string, string
   bus.subscribe((m) => taskProjector.handle(m));
   taskMachine.rebuild();
 
-  // Liveness sweep: one Clock/Sleeper loop, two policies. `emit` appends to the
-  // log AND publishes to the bus so flags/escalations are durable and observable.
-  const emit = (m: Message) => { store.append(m); void bus.publish(m); };
+  // Liveness sweep: one Clock/Sleeper loop, two policies. Route sweep flags/
+  // escalations through the broker's normal delivery path so they land in
+  // inboxes + feed (and wake the recipient), not just the durable log.
+  const emit = (m: Message) => { void broker.emitInternal(m); };
   const isoOf = (d: Date) => d.toISOString();
   const lead = cfg.agents[0]!.id; // convention: first agent is the lead/owner of escalations
   const sweep = new SweepLoop({
