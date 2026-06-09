@@ -39,9 +39,9 @@ class FakeLifecycle implements TaskLifecycle {
   all(): Task[] { return [...this.tasks.values()]; }
 }
 
-const setup = () => {
+const setup = (resolveOwner: (to: string, type: string) => string[] = (to) => [to]) => {
   const machine = new FakeLifecycle();
-  return { machine, projector: new TaskProjector(machine) };
+  return { machine, projector: new TaskProjector(machine, resolveOwner) };
 };
 
 test("task_assignment creates the task (by msg.task id) and moves it to working", () => {
@@ -51,6 +51,23 @@ test("task_assignment creates the task (by msg.task id) and moves it to working"
   assert.equal(t.state, "working");
   assert.equal(t.owner, "writer");   // owner = recipient
   assert.equal(t.title, "Build X");
+});
+
+test("ownership resolves a role 'to' to a concrete agent id (M4)", () => {
+  const resolveOwner = (to: string) => (to === "writer" ? ["fe-writer"] : [to]);
+  const { machine, projector } = setup(resolveOwner);
+  projector.handle(m({ task: "t-9", to: "writer" }));
+  assert.equal(machine.get("t-9")!.owner, "fe-writer"); // concrete id, not the role token
+});
+
+test("ownership falls back to m.to when resolution is empty or throws (M4)", () => {
+  const empty = setup(() => []);
+  empty.projector.handle(m({ task: "t-e", to: "ghost" }));
+  assert.equal(empty.machine.get("t-e")!.owner, "ghost");
+
+  const throws = setup(() => { throw new Error("no router"); });
+  throws.projector.handle(m({ task: "t-x", to: "ghost" }));
+  assert.equal(throws.machine.get("t-x")!.owner, "ghost");
 });
 
 test("approval moves the task to completed", () => {

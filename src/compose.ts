@@ -202,7 +202,10 @@ export function buildContainer(cfg: TeamConfig, templates: Record<string, string
   // (observer only, never in the delivery path). rebuild() restores state from the
   // persisted task_status log before live events flow.
   const taskMachine = new TaskMachine(store, clock, ids);
-  const taskProjector = new TaskProjector(taskMachine);
+  // Resolve task ownership to a concrete agent id (not a route token like a role)
+  // via the same router the broker uses; resolution errors fall back to m.to.
+  const ownerRouter = new Router(registry);
+  const taskProjector = new TaskProjector(taskMachine, (to, type) => ownerRouter.resolve(to, type));
   bus.subscribe((m) => taskProjector.handle(m));
   taskMachine.rebuild();
 
