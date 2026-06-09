@@ -31,6 +31,37 @@ test("re-nudges the owner of a task working past stallMs and flags it", () => {
   assert.equal(flags[0]!.to, "writer");
 });
 
+test("emits the stall flag only once across consecutive ticks (no re-nudge every sweep)", () => {
+  const s = store();
+  s.append(ev("t-1", "working", "writer", "2026-06-07T00:00:00.000Z"));
+  const woke: string[] = [];
+  const flags: Message[] = [];
+  // mirror the live path: emit appends the flag to the durable log (emitInternal -> store.append)
+  const emit = (m: Message) => { flags.push(m); s.append(m); };
+  const policy = new StallPolicy({ store: s, stallMs: 600_000,
+    waker: { wake: async (id) => { woke.push(id); } }, emit, ids: new SeqIds(), isoOf: (d) => d.toISOString() });
+
+  policy.run(new Date("2026-06-07T00:11:00.000Z"));
+  policy.run(new Date("2026-06-07T00:12:00.000Z")); // still working, same window
+  assert.equal(flags.length, 1, "flagged once for the same stall window");
+  assert.equal(woke.length, 1, "woke once");
+});
+
+test("a newer task_status resets the stall window so a later stall re-flags", () => {
+  const s = store();
+  s.append(ev("t-1", "working", "writer", "2026-06-07T00:00:00.000Z"));
+  const flags: Message[] = [];
+  const emit = (m: Message) => { flags.push(m); s.append(m); };
+  const policy = new StallPolicy({ store: s, stallMs: 600_000,
+    waker: { wake: async () => {} }, emit, ids: new SeqIds(), isoOf: (d) => d.toISOString() });
+
+  policy.run(new Date("2026-06-07T00:11:00.000Z")); // flags once
+  // progress: a fresh working status AFTER the flag resets the clock
+  s.append(ev("t-1", "working", "writer", "2026-06-07T00:15:00.000Z"));
+  policy.run(new Date("2026-06-07T00:26:00.000Z")); // 11 min after the reset -> flags again
+  assert.equal(flags.length, 2);
+});
+
 test("does not nudge before stallMs", () => {
   const s = store();
   s.append(ev("t-1", "working", "writer", "2026-06-07T00:00:00.000Z"));
