@@ -389,9 +389,10 @@ export async function runScaffoldCommand(opts: ScaffoldOptions, deps: ScaffoldDe
   );
 
   // Hub-and-spoke: the orchestrator (first agent, index 0 — the cfg.agents[0]
-  // convention DeadLetterPolicy already uses) hears ALL message types; every
-  // other agent subscribes to none, so type-based fan-out flows through the hub.
-  const subsFor = (i: number): string[] => (i === 0 ? [...DEFAULT_MESSAGE_TYPES] : []);
+  // convention DeadLetterPolicy already uses) hears ALL message types; spokes
+  // hear the orchestrator's task assignments (so the wiring is visible and the
+  // lead can broadcast an assignment), while other traffic flows through the hub.
+  const subsFor = (i: number): string[] => (i === 0 ? [...DEFAULT_MESSAGE_TYPES] : ["task_assignment"]);
 
   // 3) assemble config (fills existing window/layout fields; root anchors here)
   const cfg: Record<string, unknown> = {
