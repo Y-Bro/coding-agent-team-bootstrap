@@ -46,13 +46,21 @@ export class DirectMessenger implements Messenger {
       parts: input.parts,
       ts: this.deps.clock.isoNow(),
     };
-    // Deliver peer-to-peer to every resolved recipient (no broker in the path).
+    // Record with the broker FIRST (single durable copy, like broker-mediated
+    // send) so a partial per-recipient delivery failure can't hide the message
+    // from the log/feed.
+    await this.deps.observer.observe(m);
+    // Deliver peer-to-peer to every resolved recipient (no broker in the path),
+    // best-effort: one unreachable peer must not abort delivery to the others.
     for (const id of this.deps.router.resolve(input.to, input.type)) {
       const card = this.deps.directory.get(id);
-      if (card) await this.deps.endpoints.clientFor(card).sendMessage(m);
+      if (!card) continue;
+      try {
+        await this.deps.endpoints.clientFor(card).sendMessage(m);
+      } catch (e) {
+        console.error(`direct deliver to ${id} failed: ${e instanceof Error ? e.message : e}`);
+      }
     }
-    // One observer copy so the broker's durable log + feed stay complete.
-    await this.deps.observer.observe(m);
     return m;
   }
 }

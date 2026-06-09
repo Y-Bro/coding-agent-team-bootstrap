@@ -121,6 +121,38 @@ test("the broker observes + logs the direct message without being in the deliver
   assert.equal(broker.peek("b").length, 1);
 });
 
+test("direct send observes once up-front and tolerates a per-recipient delivery failure", async () => {
+  const a = card({ id: "a", role: "pair" });
+  const b = card({ id: "b", role: "pair" });
+  const directory = new AgentRegistry();
+  directory.register(a); directory.register(b);
+
+  const attempted: string[] = [];
+  const endpoints: A2AEndpoints = {
+    clientFor: (c) => ({
+      async sendMessage(m: Message) {
+        attempted.push(c.id);
+        if (c.id === "b") throw new Error("b unreachable");
+        return { message: m };
+      },
+    }) as any,
+  };
+  const observed: Message[] = [];
+  const observer = { observe: async (m: Message) => { observed.push(m); } };
+
+  const messenger = new DirectMessenger({
+    directory, router: new Router(directory), endpoints,
+    observer, clock: new FixedClock(), ids: new SeqIds(),
+  });
+
+  // addressing the shared role resolves both a and b; b's delivery throws
+  const m = await messenger.send({ from: "x", to: "pair", type: "note", parts: [{ kind: "text", text: "hi" }] });
+
+  assert.equal(observed.length, 1, "observed exactly once (no duplicate log entries)");
+  assert.equal(observed[0]!.id, m.id);
+  assert.ok(attempted.includes("a") && attempted.includes("b"), "both recipients attempted despite b failing");
+});
+
 test("rebuild reconstructs full state purely from the observed JSONL log", async () => {
   const { messenger, fs } = setup();
   await messenger.send({ from: "a", to: "b", type: "review_request", parts: [{ kind: "text", text: "PR #1" }] });
