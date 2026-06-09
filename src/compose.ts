@@ -13,7 +13,7 @@ import { DirectMessenger, type Messenger } from "./a2a/direct.ts";
 import { staticDiscoveryFromConfig, stampUrl, type DiscoveryProvider } from "./a2a/discovery.ts";
 import { BrokerAuthProvider, InProcessSecret, bearerHeader } from "./a2a/http/auth.ts";
 import { randomBytes } from "node:crypto";
-import { throwIfRateLimited } from "./a2a/http/ratelimit.ts";
+import { throwIfRateLimited, throwIfHttpError } from "./a2a/http/ratelimit.ts";
 import { NodeHttpClient, NodeHttpServer, type TlsClientOptions } from "./ports/http.ts";
 import { MemoryBus } from "./broker/bus.ts";
 import { TaskMachine } from "./broker/tasks.ts";
@@ -87,6 +87,7 @@ function a2aWebhook(discovery: DiscoveryProvider, tokenFor?: TokenFor, clientTls
         headers: token !== undefined ? bearerHeader(token) : undefined,
       });
       throwIfRateLimited(res); // a 429 from the agent webhook drives scheduler backoff
+      throwIfHttpError(res); // any other non-2xx (e.g. 404/500) surfaces, not silently dropped
     },
   };
 }
