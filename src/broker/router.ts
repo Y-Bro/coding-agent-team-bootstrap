@@ -14,14 +14,16 @@ export class Router implements MessageRouter {
   constructor(private registry: AgentDirectory) {}
 
   resolve(to: string, type: string): string[] {
-    const agents = this.registry.all();
-    const recipients = new Set<string>();
+    // Direct send: an exact agent-id target goes to that agent ONLY — no
+    // type-subscriber fan-out (so `--to <spoke>` is a private message, not a
+    // broadcast). Fan-out is reserved for non-id (role/capability/type) targets.
+    if (this.registry.has(to)) return [to];
 
-    if (this.registry.has(to)) recipients.add(to);
-    for (const a of agents) {
+    const recipients = new Set<string>();
+    for (const a of this.registry.all()) {
       if (a.role === to) recipients.add(a.id);
       if (a.capabilities.includes(to)) recipients.add(a.id);
-      if (a.subscribes.includes(type)) recipients.add(a.id);
+      if (a.subscribes.includes(type)) recipients.add(a.id); // broadcast-by-type
     }
     if (recipients.size === 0) {
       throw new Error(`unknown target: ${to}`);
