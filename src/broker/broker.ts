@@ -135,9 +135,10 @@ export class Broker implements BrokerDispatch, MessageObserver {
     this.inboxes.clear();
     for (const m of this.deps.store.replay()) {
       if (m.type === ACK_EVENT_TYPE) {
-        const { agentId, ids } = m.parts.find((p) => p.kind === "data")?.data as { agentId: string; ids: string[] };
-        const drop = new Set(ids);
-        this.inboxes.set(agentId, (this.inboxes.get(agentId) ?? []).filter((x) => !drop.has(x.id)));
+        const data = m.parts.find((p) => p.kind === "data")?.data as { agentId?: unknown; ids?: unknown } | undefined;
+        if (!data || typeof data.agentId !== "string" || !Array.isArray(data.ids)) continue; // skip a malformed ack
+        const drop = new Set(data.ids as string[]);
+        this.inboxes.set(data.agentId, (this.inboxes.get(data.agentId) ?? []).filter((x) => !drop.has(x.id)));
         continue;
       }
       for (const id of this.safeResolve(m.to, m.type)) this.deliver(id, m);

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Broker } from "../../src/broker/broker.ts";
+import { Broker, ACK_EVENT_TYPE } from "../../src/broker/broker.ts";
 import { JsonlStore } from "../../src/broker/store.ts";
 import { AgentRegistry } from "../../src/broker/registry.ts";
 import { Router } from "../../src/broker/router.ts";
@@ -125,6 +125,30 @@ test("rebuild skips acked messages (watermark survives restart)", async () => {
   fresh.register(card({ id: "writer" }));
   fresh.rebuild();
   assert.equal(fresh.peek("writer").length, 0); // acked message not re-delivered
+});
+
+test("rebuild tolerates a malformed ack-event payload and still rebuilds valid messages (L4)", async () => {
+  const { broker, fs } = makeBroker(new SpyTransport());
+  broker.register(card({ id: "a" })); broker.register(card({ id: "b" }));
+  await broker.send({ from: "a", to: "b", type: "note", parts: [{ kind: "text", text: "hi" }] });
+
+  // a corrupt ack record (no data part → would throw on the destructure) in the log
+  const badAck: Message = {
+    id: "ack-bad", from: "b", to: "broker", type: ACK_EVENT_TYPE,
+    parts: [{ kind: "text", text: "oops, not an ack payload" }], ts: "2026-06-06T00:00:00.000Z",
+  };
+  fs.append(".team/messages.jsonl", JSON.stringify(badAck) + "\n");
+
+  const registry2 = new AgentRegistry();
+  const fresh = new Broker({
+    store: new JsonlStore(fs, ".team/messages.jsonl"),
+    registry: registry2, router: new Router(registry2),
+    feed: new FeedRenderer(fs, ".team/feed.md"),
+    transport: new SpyTransport(), clock: new FixedClock(), ids: new SeqIds(),
+  });
+  fresh.register(card({ id: "b" }));
+  assert.doesNotThrow(() => fresh.rebuild());
+  assert.equal(fresh.peek("b").length, 1, "the valid message still rebuilds despite the bad ack");
 });
 
 test("state rebuilds from the JSONL log on a new broker (unchanged)", async () => {
