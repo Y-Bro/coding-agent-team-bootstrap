@@ -3,6 +3,7 @@ import type { Message } from "../index.ts";
 import { A2A_PATHS, A2A_METHOD_MESSAGE_STREAM, JSON_RPC_ERRORS } from "./types.ts";
 import { authorize, bearerHeader, type AuthProvider } from "./auth.ts";
 import { throwIfRateLimited } from "./ratelimit.ts";
+import { validateRpcMessage } from "./rpc-validate.ts";
 
 /** Content type for an SSE response. */
 export const SSE_CONTENT_TYPE = "text/event-stream";
@@ -53,21 +54,18 @@ export interface A2AStreamHandler {
 /** Register the `message/stream` SSE route on the injected HttpServer. */
 export function registerStreamRoute(http: HttpServer, handler: A2AStreamHandler, auth?: AuthProvider): void {
   http.route("POST", A2A_PATHS.rpcStream, async (req) => {
-    let parsed: { id?: string | number | null; params?: { message?: Message } };
-    try {
-      parsed = JSON.parse(req.body) as typeof parsed;
-    } catch {
-      return { status: 400, body: "" };
+    // Shared JSON-RPC envelope + message validation (identical to message/send).
+    const v = validateRpcMessage(req.body, A2A_METHOD_MESSAGE_STREAM);
+    if (v.error) {
+      return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: v.id, error: v.error }) };
     }
     if (auth && !authorize(req.headers, auth).ok) {
       return {
         status: 200,
-        body: JSON.stringify({ jsonrpc: "2.0", id: parsed.id ?? null, error: { code: JSON_RPC_ERRORS.unauthorized, message: "missing or invalid bearer token" } }),
+        body: JSON.stringify({ jsonrpc: "2.0", id: v.id, error: { code: JSON_RPC_ERRORS.unauthorized, message: "missing or invalid bearer token" } }),
       };
     }
-    const message = parsed.params?.message;
-    if (!message) return { status: 400, body: "" };
-    const events = await handler.onMessageStream(message);
+    const events = await handler.onMessageStream(v.message!);
     return {
       status: 200,
       body: encodeSseStream(events),
