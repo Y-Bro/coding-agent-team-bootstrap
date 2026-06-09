@@ -48,8 +48,10 @@ test("team up --detach frees the terminal but keeps the broker alive (team down 
     assert.equal(up.status, 0, `--detach should exit 0; stderr: ${up.stderr}`);
     assert.match(up.stdout, /detached/);
 
-    // The detached child stays alive: pidfile + a connectable socket appear.
-    for (let i = 0; i < 40 && !(existsSync(sock) && existsSync(pidfile)); i++) await sleep(100);
+    // The detached child stays alive: pidfile + a connectable socket appear. The
+    // pidfile is written only after the spawn loop (each agent has a launch-settle
+    // delay), so allow generous time under full-suite tmux contention.
+    for (let i = 0; i < 100 && !(existsSync(sock) && existsSync(pidfile)); i++) await sleep(100);
     assert.ok(existsSync(pidfile), "broker pidfile should exist");
     assert.ok(await connectable(sock), "broker socket should be connectable");
 

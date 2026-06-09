@@ -58,9 +58,10 @@ test("spawn (launch) types the launch command, sleeps 400ms, then sends Enter se
   assert.ok(events.includes("send-keys:enter"));
   assert.ok(idx("send-keys:text") < idx("sleep"));
   assert.ok(idx("sleep") < idx("send-keys:enter"));
-  assert.deepEqual(sleeps, [400]);
+  // launch: type -> 400ms -> Enter, then 1500ms settle, then bootstrap: type -> 400ms -> Enter
+  assert.deepEqual(sleeps, [400, 1500, 400]);
 
-  // the launch command rode in the literal-text (-l) send-keys, NOT the Enter call
+  // the launch command rode in the FIRST literal-text (-l) send-keys, NOT the Enter call
   const sends = tmux.calls.filter((c) => c[0] === "send-keys");
   const textSend = sends.find((c) => c.includes("-l"))!;
   const enterSend = sends.find((c) => c.includes("Enter"))!;

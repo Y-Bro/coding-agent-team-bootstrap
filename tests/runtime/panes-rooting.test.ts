@@ -36,3 +36,21 @@ test("spawn opens the pane at the project root, not shared/<id>", async () => {
   assert.equal(cwd, "/proj", "pane cwd must be the project root");
   assert.notEqual(cwd, "/proj/shared/lead");
 });
+
+test("after launch, spawn injects a bootstrap message with commands + role-file pointer", async () => {
+  const tmux = new FakeTmux();
+  const rt = new PanesRuntime(tmux, "t", resolveEngines({}), noSleep);
+  await rt.spawn(card, ctx());
+  // literal-text send-keys payloads, in order: [0] = launch command, [1] = bootstrap message
+  const texts = tmux.calls
+    .filter((c) => c[0] === "send-keys" && c.includes("-l"))
+    .map((c) => c[c.indexOf("-l") + 1]!);
+  assert.equal(texts.length, 2, "launch command, then bootstrap message");
+  const boot = texts[1]!;
+  assert.ok(boot.includes("lead"), "names the agent");
+  assert.ok(boot.includes("team inbox lead"), "inline read-mail command");
+  assert.ok(boot.includes("team send --to"), "inline send command");
+  assert.ok(boot.includes("/proj/shared/lead/CLAUDE.md"), "absolute role-file pointer");
+  assert.ok(boot.includes("/proj") && /only inside/i.test(boot), "pins the working dir to root");
+  assert.ok(!boot.trimStart().startsWith("#"), "no Claude memory-prefix");
+});

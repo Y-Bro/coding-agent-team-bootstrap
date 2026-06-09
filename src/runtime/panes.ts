@@ -11,6 +11,12 @@ const DEFAULT_LAYOUT = "even-horizontal";
  * text (render race), so we type, wait, then submit as a separate keystroke.
  */
 const SUBMIT_DELAY_MS = 400;
+/**
+ * Delay after launching the engine REPL before typing the bootstrap message, so
+ * it lands at the engine's main prompt (past any first-run "trust this folder?"
+ * gate) rather than being consumed by startup.
+ */
+const LAUNCH_SETTLE_MS = 1500;
 
 /** v1 runtime: each agent is a tmux pane; wake = send-keys nudge. */
 export class PanesRuntime implements Runtime {
@@ -53,6 +59,24 @@ export class PanesRuntime implements Runtime {
     const paneId = this.placePane(windowName, ctx.projectRoot, ctx.config.layout);
     this.paneIds.set(agent.id, paneId);
     await this.typeAndSubmit(paneId, launch);
+    await this.sleeper.sleep(LAUNCH_SETTLE_MS);
+    await this.typeAndSubmit(paneId, this.bootstrapMessage(agent, ctx));
+  }
+
+  /**
+   * One deterministic onboarding line typed after launch: names the agent, points
+   * at its role file (absolute, under shared/<id> — never relies on cwd auto-read,
+   * since cwd is the user's repo root), embeds the exact A2A commands so the engine
+   * never has to discover them, and pins the working directory to the project root.
+   */
+  private bootstrapMessage(agent: AgentCard, ctx: SpawnCtx): string {
+    const p = this.engines.get(agent.engine)!;
+    const roleFilePath = `${agent.workdir}/${p.roleFile}`;
+    const orchestrator = ctx.config.agents[0]?.id ?? agent.id;
+    const exampleTo = agent.id === orchestrator ? "<teammate-id>" : orchestrator;
+    return `You are ${agent.id} (${agent.role}). Read your role guidance now: ${roleFilePath} — follow it. ` +
+      `To read mail: team inbox ${agent.id}. To send: team send --to ${exampleTo} --type <type> --text "...". ` +
+      `Work only inside ${ctx.projectRoot}; never edit any other repo.`;
   }
 
   async wake(agentId: string, summary: string): Promise<void> {
