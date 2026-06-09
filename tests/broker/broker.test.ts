@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Broker } from "../../src/broker/broker.ts";
+import { Broker, ACK_EVENT_TYPE } from "../../src/broker/broker.ts";
 import { JsonlStore } from "../../src/broker/store.ts";
 import { AgentRegistry } from "../../src/broker/registry.ts";
 import { Router } from "../../src/broker/router.ts";
@@ -11,7 +11,10 @@ import type { AgentCard, Message } from "../../src/a2a/index.ts";
 
 class SpyTransport implements Transport {
   delivered: Array<{ id: string; type: string; from: string }> = [];
+  /** When set, deliver() throws for this recipient id (simulates a down/unreachable agent). */
+  failFor?: string;
   async deliver(recipient: AgentCard, message: Message): Promise<void> {
+    if (recipient.id === this.failFor) throw new Error(`transport down for ${recipient.id}`);
     this.delivered.push({ id: recipient.id, type: message.type, from: message.from });
   }
   async listen(): Promise<void> {}
@@ -56,6 +59,39 @@ test("send routes, persists, delivers over the transport, and lands in recipient
   assert.equal(broker.peek("fe-reviewer").length, 0);
 });
 
+test("emitInternal records to inbox + feed + delivers (sweep parity)", async () => {
+  const transport = new SpyTransport();
+  const { broker, fs } = makeBroker(transport);
+  broker.register(card({ id: "lead", role: "lead" }));
+
+  const m: Message = {
+    id: "m-int-1", from: "broker", to: "lead", type: "escalation_request",
+    parts: [{ kind: "text", text: "dead letter" }], ts: "2026-06-06T00:00:00.000Z",
+  };
+  await broker.emitInternal(m);
+
+  assert.ok(broker.peek("lead").some((x) => x.id === "m-int-1"), "in lead inbox");
+  assert.match(fs.read(".team/feed.md"), /dead letter/);
+  assert.match(fs.read(".team/messages.jsonl"), /m-int-1/);
+  assert.ok(transport.delivered.some((d) => d.id === "lead"), "delivered/woken");
+});
+
+test("send tolerates a transport failure for one recipient (at-least-once; inbox is source of truth)", async () => {
+  const transport = new SpyTransport();
+  transport.failFor = "a"; // a's wake throws; b's succeeds
+  const { broker } = makeBroker(transport);
+  broker.register(card({ id: "a", role: "pair" }));
+  broker.register(card({ id: "b", role: "pair" }));
+
+  // addressing the shared role resolves BOTH a and b
+  const m = await broker.send({ from: "x", to: "pair", type: "note", parts: [{ kind: "text", text: "hi" }] });
+
+  // message is still durable + in BOTH inboxes despite a's transport failing, and send did not throw
+  assert.ok(broker.peek("a").some((x) => x.id === m.id), "in a's inbox despite failed wake");
+  assert.ok(broker.peek("b").some((x) => x.id === m.id), "in b's inbox");
+  assert.ok(transport.delivered.some((d) => d.id === "b"), "b still delivered after a failed");
+});
+
 test("peek is non-destructive; ack removes only acked ids", async () => {
   const { broker } = makeBroker(new SpyTransport());
   broker.register(card({ id: "lead" }));
@@ -89,6 +125,30 @@ test("rebuild skips acked messages (watermark survives restart)", async () => {
   fresh.register(card({ id: "writer" }));
   fresh.rebuild();
   assert.equal(fresh.peek("writer").length, 0); // acked message not re-delivered
+});
+
+test("rebuild tolerates a malformed ack-event payload and still rebuilds valid messages (L4)", async () => {
+  const { broker, fs } = makeBroker(new SpyTransport());
+  broker.register(card({ id: "a" })); broker.register(card({ id: "b" }));
+  await broker.send({ from: "a", to: "b", type: "note", parts: [{ kind: "text", text: "hi" }] });
+
+  // a corrupt ack record (no data part → would throw on the destructure) in the log
+  const badAck: Message = {
+    id: "ack-bad", from: "b", to: "broker", type: ACK_EVENT_TYPE,
+    parts: [{ kind: "text", text: "oops, not an ack payload" }], ts: "2026-06-06T00:00:00.000Z",
+  };
+  fs.append(".team/messages.jsonl", JSON.stringify(badAck) + "\n");
+
+  const registry2 = new AgentRegistry();
+  const fresh = new Broker({
+    store: new JsonlStore(fs, ".team/messages.jsonl"),
+    registry: registry2, router: new Router(registry2),
+    feed: new FeedRenderer(fs, ".team/feed.md"),
+    transport: new SpyTransport(), clock: new FixedClock(), ids: new SeqIds(),
+  });
+  fresh.register(card({ id: "b" }));
+  assert.doesNotThrow(() => fresh.rebuild());
+  assert.equal(fresh.peek("b").length, 1, "the valid message still rebuilds despite the bad ack");
 });
 
 test("state rebuilds from the JSONL log on a new broker (unchanged)", async () => {

@@ -29,9 +29,16 @@ test("routes by capability", () => {
   assert.deepEqual(fixture().resolve("frontend", "note"), ["fe-writer"]);
 });
 
-test("includes subscribers of the message type even when they don't match 'to'", () => {
-  // fe-writer subscribes to 'ruling' but is not the 'lead' id/role/capability.
-  assert.deepEqual(fixture().resolve("lead", "ruling").sort(), ["fe-writer", "lead"]);
+test("a NON-id (role) target broadcasts to type-subscribers too", () => {
+  // 'reviewer' is a role (not an agent id): fe-reviewer matches the role, and
+  // fe-writer is pulled in as a 'ruling' subscriber (broadcast-by-type).
+  assert.deepEqual(fixture().resolve("reviewer", "ruling").sort(), ["fe-reviewer", "fe-writer"]);
+});
+
+test("a direct agent-id target does NOT fan out to type-subscribers (M3 direct send)", () => {
+  // fe-reviewer is an exact agent id, so a 'ruling' send addressed to it goes
+  // ONLY to fe-reviewer — even though fe-writer subscribes to 'ruling'.
+  assert.deepEqual(fixture().resolve("fe-reviewer", "ruling"), ["fe-reviewer"]);
 });
 
 test("delivers to a pure subscriber with no other 'to' match", () => {

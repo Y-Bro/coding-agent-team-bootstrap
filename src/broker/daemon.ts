@@ -29,6 +29,10 @@ export class BrokerDaemon {
   private async handle(req: Request): Promise<Response> {
     trace("daemon", `rpc dispatch method=${req.method}`);
     try {
+      if (!req || typeof (req as { method?: unknown }).method !== "string") {
+        trace("daemon", "reject invalid request shape (missing method)");
+        return { ok: false, error: "invalid request: missing method" };
+      }
       switch (req.method) {
         case "agent/register":
           this.broker.register(req.params.card);

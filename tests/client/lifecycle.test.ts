@@ -45,6 +45,20 @@ test("teamUp starts the daemon, bootstraps, writes a pidfile, and stays alive", 
   assert.equal(daemon.stopped, false); // NOT stopped — stays alive
 });
 
+test("teamUp rolls back (stops daemon, clears pidfile + socket, re-throws) when bootstrap fails", async () => {
+  const daemon = new FakeDaemon();
+  const boot: BootstrapLike = { async up() { throw new Error("bootstrap boom"); }, async down() {} };
+  const fs = new MemoryFs();
+  fs.write(SOCK, ""); // the daemon bound the socket before bootstrap ran
+  const proc = new FakeProc();
+
+  await assert.rejects(() => teamUp(daemon, boot, SOCK, deps(fs, proc)), /bootstrap boom/);
+
+  assert.equal(daemon.stopped, true, "daemon stopped on rollback");
+  assert.equal(fs.exists(PID), false, "no stale pidfile left behind");
+  assert.equal(fs.exists(SOCK), false, "socket removed so the next run binds cleanly");
+});
+
 test("the shutdown handler tears down cleanly and removes the pidfile + socket", async () => {
   const daemon = new FakeDaemon();
   const boot = new FakeBootstrap();

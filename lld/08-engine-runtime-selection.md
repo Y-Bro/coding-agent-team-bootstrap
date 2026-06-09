@@ -67,10 +67,11 @@ flowchart TD
 ## C. The `Runtime` seam (`src/runtime/runtime.ts`)
 
 ```ts
+interface SpawnCtx { config: TeamConfig; socketPath: string; projectRoot: string }
 interface Runtime {
-  spawn(agent: AgentCard, ctx: {config, socketPath}): Promise<void>  // bring online
-  wake(agentId: string, summary: string): Promise<void>             // "you have mail; pull inbox"
-  teardown(): Promise<void>                                         // release everything spawn created
+  spawn(agent: AgentCard, ctx: SpawnCtx): Promise<void>  // bring online (cwd = ctx.projectRoot)
+  wake(agentId: string, summary: string): Promise<void>  // "you have mail; pull inbox"
+  teardown(): Promise<void>                              // release everything spawn created
 }
 ```
 
@@ -78,10 +79,14 @@ The broker and bootstrapper depend ONLY on this — nothing tmux/HTTP-specific
 leaks past it. A new hosting strategy = a new `Runtime` impl selected in
 `compose.ts`.
 
-| impl | spawn | wake | teardown |
+`SpawnCtx.projectRoot` (= `dirname(teamDir)`, threaded by the bootstrapper) is the
+cwd BOTH runtimes launch the engine at — the agent operates on the whole project,
+not its near-empty `shared/<id>` dir (role files still live under `shared/<id>`).
+
+| impl | spawn (cwd = `ctx.projectRoot`) | wake | teardown |
 |---|---|---|---|
-| `PanesRuntime` | open tmux pane + launch CLI | `send-keys` nudge → sleep → Enter | `kill-session` |
-| `ServersRuntime` | spawn `kind:server` process + `link.register` | A2A webhook/notify push | `kill` each process |
+| `PanesRuntime` | tmux pane `-c <projectRoot>` + launch CLI (env values + args **shell-quoted**), then launch-settle + bootstrap-message inject | `send-keys` nudge → sleep → Enter | `kill-session` |
+| `ServersRuntime` | `spawner.spawn(cmd, {cwd: projectRoot})` `kind:server` process + `link.register` | A2A webhook/notify push | `kill` each process |
 | `CompositeRuntime` | delegate by `resolve(agent)`, remember kind | route to the same kind | teardown each distinct runtime once |
 
 ## D. CompositeRuntime routing (`src/runtime/composite.ts`)

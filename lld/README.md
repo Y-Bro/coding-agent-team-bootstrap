@@ -42,8 +42,8 @@ A **unix-domain socket** carries the client RPC (`team send` / `team inbox` /
 | # | File | Covers |
 |---|------|--------|
 | 1 | [01-composition-root.md](01-composition-root.md) | Component/dependency graph — what `compose.ts` wires (ports, broker, runtime, bus, sweep, daemon) |
-| 2 | [02-team-up-sequence.md](02-team-up-sequence.md) | `team up` — config load → buildContainer → daemon listen → bootstrap (worktrees, cards, register, role files) → runtime spawn |
-| 3 | [03-message-life.md](03-message-life.md) | A message's life: `send` → router.resolve → record → store.append → bus.publish → transport.deliver → wake → peek → ack |
+| 2 | [02-team-up-sequence.md](02-team-up-sequence.md) | `team up` — config load → buildContainer → daemon listen → bootstrap (worktrees, cards, register, never-clobber role files) → spawn at PROJECT ROOT (launch-settle + bootstrap-message inject) → ROLLBACK on failure |
+| 3 | [03-message-life.md](03-message-life.md) | A message's life: `send` → router DIRECT vs BROADCAST → record → log/feed/inbox/publish → per-recipient best-effort deliver → wake → peek → ack; `emitInternal` (sweep) + direct observe-first variant |
 | 4 | [04-task-projection.md](04-task-projection.md) | Task lifecycle projected from message traffic (TaskProjector + TaskMachine) |
 | 5 | [05-sweep.md](05-sweep.md) | Liveness sweep loop: StallPolicy + DeadLetterPolicy |
 | 6 | [06-team-new-scaffold.md](06-team-new-scaffold.md) | `team new` — wizard → layout → assemble config → context files (guidance + wiring footer) |

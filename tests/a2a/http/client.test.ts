@@ -62,6 +62,14 @@ test("sendMessage throws a scheduler-recognized rate-limit error on HTTP 429", a
   });
 });
 
+test("sendMessage throws a structured error including the status on a non-2xx HTTP response", async () => {
+  const server = new FakeHttpServer();
+  server.route("POST", "/a2a", async () => ({ status: 500, body: "boom" }));
+  const client = new A2AClient(new FakeHttpClient(server, BASE), BASE);
+  // must surface the HTTP 500 (not a JSON.parse error on the non-JSON body)
+  await assert.rejects(() => client.sendMessage(msg), /500/);
+});
+
 test("sendMessage surfaces a JSON-RPC error as a thrown Error", async () => {
   const client = wired(async () => { throw new Error("nope"); });
   await assert.rejects(() => client.sendMessage(msg), /nope/);

@@ -20,7 +20,8 @@ sequenceDiagram
   BUS->>TP: handle(m)
   TP->>TP: if not m.task → return
   TP->>TP: state = TYPE_TO_STATE[m.type]; if none → return
-  TP->>TM: ensure(m.task, {title, owner:m.to})
+  TP->>TP: owner = resolveOwner(m.to, m.type)[0] ?? m.to  (resolve→concrete agent id)
+  TP->>TM: ensure(m.task, {title, owner})
   alt task absent
     TM->>TM: create in "submitted"
     TM->>ST: append task_status{submitted}
@@ -45,6 +46,15 @@ sequenceDiagram
 
 Any other type (including the projector's own `task_status` output) is ignored —
 no feedback loop. A message with no `task` id is ignored.
+
+### Owner = a concrete agent id, not a route token
+
+A `task_assignment` may be addressed to a **role** or **capability** (`m.to`), not
+a real agent. The projector is constructed with a `resolveOwner(to, type)`
+function (the broker's `router.resolve`) and sets `owner = resolveOwner(...)[0] ??
+m.to` — so the task is owned by a concrete agent id the stall sweep can actually
+`wake`. Resolution is guarded by try/catch and falls back to `m.to` when it is
+empty or throws (e.g. an unknown target).
 
 ## Task state machine — `LEGAL_TRANSITIONS` (`tasks.ts`)
 

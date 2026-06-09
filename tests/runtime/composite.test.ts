@@ -18,7 +18,7 @@ const card = (id: string, runtime?: "panes" | "servers"): AgentCard => ({
   workdir: ".", subscribes: [], ...(runtime ? { runtime } : {}),
 } as AgentCard & { runtime?: string });
 
-const ctx: SpawnCtx = { config: {} as any, socketPath: "/tmp/s.sock" };
+const ctx: SpawnCtx = { config: {} as any, socketPath: "/tmp/s.sock", projectRoot: "/proj" };
 
 function setup() {
   const panes = new SpyRuntime();

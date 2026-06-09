@@ -57,13 +57,20 @@ export class Bootstrapper {
         console.warn(`warning: role file ${roleFilePath} written by multiple agents — last one (${a.id}) wins`);
       }
       roleFilesSeen.add(roleFilePath);
-      trace("bootstrap", `render role file ${roleFilePath} (template=${tmplName})`);
-      this.deps.fs.write(roleFilePath, renderRoleFile(tmpl, a));
+      // Never-overwrite: `team new`'s ContextScaffolder writes rich per-agent
+      // guidance to this same path. Only generate a role file when one is
+      // absent (hand-written team.yaml setups), so `team up` never clobbers it.
+      if (!this.deps.fs.exists(roleFilePath)) {
+        trace("bootstrap", `render role file ${roleFilePath} (template=${tmplName})`);
+        this.deps.fs.write(roleFilePath, renderRoleFile(tmpl, a));
+      } else {
+        trace("bootstrap", `role file ${roleFilePath} exists (scaffold) — preserve`);
+      }
     });
     trace("bootstrap", `spawning ${cards.length} agents via runtime`);
     for (const card of cards) {
-      trace("bootstrap", `runtime.spawn ${card.id}`);
-      await this.deps.runtime.spawn(card, { config: this.cfg, socketPath });
+      trace("bootstrap", `runtime.spawn ${card.id} (projectRoot=${dirname(teamDir)})`);
+      await this.deps.runtime.spawn(card, { config: this.cfg, socketPath, projectRoot: dirname(teamDir) });
     }
   }
 

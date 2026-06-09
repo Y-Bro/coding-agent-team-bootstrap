@@ -36,9 +36,10 @@ sequenceDiagram
   BR->>BR: inbox[id].push(m) for each recipient
   BR->>BUS: publisher.publish(m)  (fire-and-forget)
   BUS->>TP: handle(m)  → task transitions (see #4)
-  BR->>TR: transport.deliver(card, m) for each recipient
+  BR->>TR: deliverAll: per-recipient transport.deliver(card, m), BEST-EFFORT
   TR->>RT: wake(id, summary)  (socket waker → panes.wake)
   RT->>RT: send-keys -l nudge → sleep → Enter
+  Note over BR,TR: one recipient's wake throwing is caught & logged — it does NOT<br/>abort the send or skip the other recipients (inbox already has the msg)
   DM-->>RPC: {ok:true, result: m}
   RPC-->>CLI: Message
   CLI-->>S: "sent task_assignment → worker"
@@ -59,24 +60,31 @@ sequenceDiagram
 
 ## Routing rules — `Router.resolve(to, type)` (`src/broker/router.ts`)
 
-A `to` value can be an **id**, a **role**, or a **capability**; subscribers of the
-message **type** are always added. The recipient set is the **union**:
+Resolution has **two mutually-exclusive modes**, decided first by `registry.has(to)`:
+
+- **DIRECT** — `to` is an exact registered **agent id** → recipients = `[to]` ONLY.
+  No type-subscriber fan-out: `--to <spoke>` is a *private* message, so a direct
+  send never also wakes the hub.
+- **BROADCAST** — `to` is NOT a known id (a **role**, a **capability**, or any
+  token) → fan out the **union** of: agents whose `role == to`, agents whose
+  `capabilities` include `to`, and agents who `subscribe` to the message **type**.
 
 ```mermaid
-flowchart LR
-  TO["to / type"] --> ID{"registry.has(to)?"} -->|yes| ADD1["+ to"]
-  TO --> ROLE{"agent.role == to?"} -->|yes| ADD2["+ agent.id"]
-  TO --> CAP{"to in agent.capabilities?"} -->|yes| ADD3["+ agent.id"]
-  TO --> SUB{"type in agent.subscribes?"} -->|yes| ADD4["+ agent.id"]
-  ADD1 & ADD2 & ADD3 & ADD4 --> SET["dedup set"]
+flowchart TD
+  TO["to / type"] --> ID{"registry.has(to)?"}
+  ID -- "yes (DIRECT)" --> D["recipients = [to]  (no fan-out)"]
+  ID -- "no (BROADCAST)" --> ROLE{"agent.role == to?"} -->|yes| ADD2["+ agent.id"]
+  ID -- "no (BROADCAST)" --> CAP{"to in agent.capabilities?"} -->|yes| ADD3["+ agent.id"]
+  ID -- "no (BROADCAST)" --> SUB{"type in agent.subscribes?"} -->|yes| ADD4["+ agent.id"]
+  ADD2 & ADD3 & ADD4 --> SET["dedup set"]
   SET --> E{"empty?"} -->|yes| THROW["throw 'unknown target: to'"]
   E -->|no| OUT["recipient ids"]
 ```
 
 > **Hub-and-spoke consequence:** `team new` makes the orchestrator (`agents[0]`)
-> subscribe to ALL types and everyone else to none. So a message addressed to
-> anyone *also* reaches the orchestrator via the subscription rule — which is why
-> in the live trace `--to worker` resolved to `[worker, lead]`.
+> subscribe to ALL types and everyone else to none. In BROADCAST mode (a role /
+> capability / type-only target) the hub is always added via the subscription
+> rule; but a DIRECT `--to <id>` reaches that id ALONE (no hub copy).
 
 ## Persistence + projections — the log is the single source of truth
 
@@ -94,11 +102,18 @@ graph LR
 ```
 
 - **`record`** (`Broker.record`, private) is the ONLY method that appends a normal
-  message, feeds it, fills inboxes, and publishes — both `send` and `observe`
-  funnel through it.
+  message, feeds it, fills inboxes, and publishes — `send`, `observe`, AND
+  `emitInternal` all funnel through it.
 - **Delivery vs recording are separate.** `record` fills the in-memory inbox and
-  the log (so `peek` works); `transport.deliver` *wakes* the recipient (types a
-  nudge / pushes a webhook). A pane agent then runs `team inbox` to pull.
+  the log (so `peek` works); `deliverAll` then *wakes* each recipient per-recipient
+  and **best-effort** (a `transport.deliver` that throws is caught and logged, not
+  re-raised). The inbox is the source of truth, so a missed wake never loses the
+  message — a pane agent still pulls it via `team inbox`.
+- **`emitInternal`** (`Broker.emitInternal`) is how sweep policies (stall /
+  dead-letter) inject a flag/escalation through the SAME path as a real send:
+  `safeResolve(to,type)` → `record` (log + feed + inbox + publish) → `deliverAll`
+  (best-effort wake). So a `stall_flag`/`escalation` shows up in `team inbox` +
+  `feed.md`, not just the durable log.
 - **peek/ack watermark** (`Broker.peek` / `Broker.ack`): `peek` is
   non-destructive; `ack` drops ids from the inbox AND appends an `inbox_ack`
   record. `rebuild()` replays the log and skips acked ids, so a crash between
@@ -107,10 +122,19 @@ graph LR
 ## Direct (peer-to-peer) variant
 
 When `cfg.delivery === "direct"` (all-servers only), the **sender** delivers
-peer-to-peer over A2A via `DirectMessenger` (`src/a2a/direct.ts`) and the broker
-is only an **observer**: `Broker.observe(m)` calls `record(m, resolve(...))` to
-keep the log/feed/inbox complete but does NOT call `transport.deliver`. Same log,
-same projections; the broker is just off the delivery path.
+peer-to-peer over A2A via `DirectMessenger` (`src/a2a/direct.ts`). The order is
+**observe-FIRST, then deliver**:
+
+1. Build the `Message` (single id/ts).
+2. `observer.observe(m)` → `Broker.observe` calls `record(m, resolve(...))` so the
+   durable log + feed + inbox state are complete BEFORE any peer delivery — a
+   partial per-recipient failure can never hide the message from the log.
+3. For each resolved recipient, `endpoints.clientFor(card).sendMessage(m)`
+   peer-to-peer, **best-effort**: an unreachable peer is caught and logged, never
+   aborting delivery to the others (the log is the source of truth).
+
+The broker is NOT in the delivery path — it is purely the observer. Same log,
+same projections; identical to broker-mediated send for every downstream reader.
 
 ## Message shape (replicate exactly)
 

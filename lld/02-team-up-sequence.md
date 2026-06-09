@@ -29,24 +29,39 @@ sequenceDiagram
   BIN->>LC: teamUp(daemon, bootstrapper, socket, deps)
   LC->>DM: daemon.start(socket)
   DM->>DM: NodeSocketServer.listen(socket, handler)
-  LC->>BS: bootstrapper.up(socket)
+  LC->>BS: bootstrapper.up(socket)   (inside try/catch → ROLLBACK on failure)
   BS->>GIT: createWorktrees(cfg, git, base)
   loop each agent (config order)
     BS->>BS: card = stampCard(toCard(agent))
     BS->>CMP: register(card)  (broker roster)
     BS->>BS: fs.write .team/cards/<id>.json
-    BS->>BS: fs.write <workdir>/<roleFile> = renderRoleFile(template, agent)
+    BS->>BS: if !exists(<workdir>/<roleFile>): write renderRoleFile (never clobber a scaffold)
   end
   loop each agent (config order)
-    BS->>RT: runtime.spawn(card, {config, socketPath})
-    RT->>TMUX: placePane (new-session | new-window | split-window)
-    RT->>TMUX: send-keys -l "<launch cmd>"  (type)
-    RT->>RT: sleeper.sleep(400ms)
-    RT->>TMUX: send-keys Enter             (submit)
+    BS->>RT: runtime.spawn(card, {config, socketPath, projectRoot})
+    RT->>TMUX: placePane(-c PROJECT ROOT)  (new-session | new-window | split-window)
+    RT->>TMUX: send-keys -l "<launch cmd>" → sleep(400ms) → Enter
+    RT->>RT: sleeper.sleep(LAUNCH_SETTLE_MS = 1500ms)  (settle past trust-folder gate)
+    RT->>TMUX: send-keys -l "<bootstrap message>" → sleep → Enter  (inject onboarding)
   end
   LC->>LC: fs.write pidfile = pid
   BIN->>BIN: sweep.start()  (background loop)
   Note over BIN: process stays alive — socket holds the event loop
+```
+
+## ROLLBACK on bootstrap failure (`lifecycle.teamUp`)
+
+`teamUp` wraps `bootstrapper.up` in a try/catch. The daemon is already listening
+by then, so a partial bring-up (e.g. a spawn throws) must not leave a live daemon
+and a bound socket to poison the next `team up`:
+
+```mermaid
+flowchart TD
+  S["daemon.start(socket) OK"] --> U{"bootstrapper.up throws?"}
+  U -- no --> P["write pidfile; register shutdown/exit cleanup; stay alive"]
+  U -- yes --> R1["daemon.stop()"]
+  R1 --> R2["cleanup(): remove pidfile + socket"]
+  R2 --> RT["re-throw — team up exits non-zero, clean slate"]
 ```
 
 ## Step detail (file:function)
@@ -69,11 +84,23 @@ sequenceDiagram
   - `renderRoleFile(template, agent)` → substitutes `{{id}}`, `{{role}}`, etc.
   - Two agents sharing the same workdir+engine collide on one role file → warn,
     last write wins (panes teams use `workdir: shared/<id>` to avoid this).
+  - **Never-clobber:** the role file is written ONLY if it doesn't already exist,
+    so `team up` after `team new` preserves the scaffold's rich per-agent guidance.
 - **`register(card)`** — `Broker.register` populates `AgentRegistry` so
   `team ps`/`team send` can resolve the roster (panes engines never self-register).
 - **`runtime.spawn`** — `PanesRuntime.spawn` (next diagram detail) or
-  `ServersRuntime.spawn`. Launch command:
-  `TEAM_AGENT_ID=<id> TEAM_SOCKET=<socket> <env> <command> <args>`.
+  `ServersRuntime.spawn`, given `ctx = {config, socketPath, projectRoot}`. Launch
+  command: `TEAM_AGENT_ID=<id> TEAM_SOCKET=<socket> <env> <command> <args>` (env
+  values + args shell-quoted; the command is a trusted binary name).
+  - **Launched at PROJECT ROOT.** The pane/process `cwd` is `ctx.projectRoot`
+    (`dirname(teamDir)`), NOT `shared/<id>` — the agent operates on the whole
+    project. The role file still lives under `shared/<id>` and is named in the
+    bootstrap message (absolute path), since cwd no longer auto-reads it.
+  - **Launch-settle + bootstrap message** (panes): after typing the launch
+    command, sleep `LAUNCH_SETTLE_MS` (1500ms) so the engine reaches its main
+    prompt past any "trust this folder?" gate, then type ONE deterministic
+    onboarding line (`bootstrapMessage`): names the agent, points at its role file,
+    embeds the exact `team inbox`/`team send` commands, and pins work to the root.
 - **Stay alive** — `teamUp` writes the pidfile and returns WITHOUT exiting; the
   socket server keeps the event loop open so later `team send`/`team inbox` reach
   the broker. `team down` signals the pid from the pidfile.
@@ -82,8 +109,8 @@ sequenceDiagram
 
 ```mermaid
 flowchart TD
-  A["spawn(agent)"] --> B{"window already opened?"}
-  B -- yes --> C["split-window -t <winId> -P -F #{pane_id}"]
+  A["spawn(agent)  (-c = ctx.projectRoot)"] --> B{"window already opened?"}
+  B -- yes --> C["split-window -t <winId> -c <projectRoot> -P -F #{pane_id}"]
   C --> D["select-layout -t <winId> <layout|even-horizontal>"]
   D --> P["return new pane id"]
   B -- no --> E{"session created yet?"}

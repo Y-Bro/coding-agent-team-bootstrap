@@ -88,12 +88,14 @@ test("routes a config-driven message by subscription over a real socket", async 
   await daemon.start(sock);
   try {
     const client = new BrokerClient(new NodeSocketClient(), sock);
-    // a 'ruling' aimed at the lead also fans out to its 'ruling' subscribers
-    // (fe-writer, be-writer) per their team.yaml subscriptions.
-    await client.send({ from: "lead", to: "lead", type: "ruling", parts: [{ kind: "text", text: "ship it" }] });
+    // a 'ruling' broadcast (non-id target) fans out to its 'ruling' subscribers
+    // (fe-writer, be-writer) per their team.yaml subscriptions. A direct id target
+    // would NOT fan out (M3) — broadcasting requires a non-id target like the type.
+    await client.send({ from: "lead", to: "ruling", type: "ruling", parts: [{ kind: "text", text: "ship it" }] });
     assert.equal((await client.peek("fe-writer")).length, 1);
     assert.equal((await client.peek("be-writer")).length, 1);
-    assert.equal((await client.peek("lead")).length, 1);
+    // lead is reached only when addressed by id; it does not subscribe to 'ruling'
+    assert.equal((await client.peek("lead")).length, 0);
     // a reviewer only gets review_request (its subscription), not the ruling
     assert.equal((await client.peek("fe-reviewer")).length, 0);
 

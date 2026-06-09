@@ -24,14 +24,24 @@ function titleOf(m: Message): string {
  * messages (idempotent + try/catch), satisfying the bus adapter contract.
  */
 export class TaskProjector {
-  constructor(private machine: TaskLifecycle) {}
+  /**
+   * @param resolveOwner maps a message's (to, type) to recipient ids so task
+   *   ownership is a concrete agent id, not a route token (role/capability/type).
+   *   Falls back to `m.to` when resolution is empty or throws.
+   */
+  constructor(
+    private machine: TaskLifecycle,
+    private resolveOwner: (to: string, type: string) => string[] = (to) => [to],
+  ) {}
 
   handle(m: Message): void {
     if (!m.task) return;
     const to = TYPE_TO_STATE[m.type];
     if (!to) return;
-    trace("task-projector", `${m.type} on task=${m.task} → ensure(owner=${m.to}) + transition→${to}`);
-    this.machine.ensure(m.task, { title: titleOf(m), owner: m.to });
+    let owner = m.to;
+    try { owner = this.resolveOwner(m.to, m.type)[0] ?? m.to; } catch { /* keep m.to */ }
+    trace("task-projector", `${m.type} on task=${m.task} → ownership resolved to=${owner} + transition→${to}`);
+    this.machine.ensure(m.task, { title: titleOf(m), owner });
     try {
       this.machine.transition(m.task, to);
     } catch {

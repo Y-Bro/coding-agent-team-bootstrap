@@ -47,11 +47,13 @@ export class ServersRuntime implements Runtime {
   async spawn(agent: AgentCard, ctx: SpawnCtx): Promise<void> {
     assertServerEngine(agent.engine, this.deps.engines);
     const profile = this.deps.engines.get(agent.engine)!;
-    trace("servers", `spawn ${agent.id}: process ${profile.command} (server engine) + link.register`);
+    trace("servers", `spawn ${agent.id}: process ${profile.command} (server engine) at PROJECT ROOT ${ctx.projectRoot} + link.register`);
     const handle = this.deps.spawner.spawn(profile.command, {
       args: profile.args,
       env: { ...(profile.env ?? {}), TEAM_AGENT_ID: agent.id, TEAM_BROKER_SOCKET: ctx.socketPath },
-      cwd: agent.workdir,
+      // Run the engine at the PROJECT ROOT so it operates on the whole project
+      // (parity with the panes runtime); role files still live under shared/<id>.
+      cwd: ctx.projectRoot,
     });
     this.procs.set(agent.id, handle);
     this.cards.set(agent.id, agent);

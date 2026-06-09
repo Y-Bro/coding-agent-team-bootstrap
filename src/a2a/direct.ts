@@ -5,6 +5,7 @@ import type { A2AEndpoints } from "../broker/a2a-transport.ts";
 import type { MessageObserver, SendInput } from "../broker/broker.ts";
 import type { Clock } from "../ports/clock.ts";
 import type { IdGenerator } from "../ports/ids.ts";
+import { trace } from "../obs/trace.ts";
 
 /** The agent-side messaging entry point (mirror of broker-mediated send). */
 export interface Messenger {
@@ -46,13 +47,24 @@ export class DirectMessenger implements Messenger {
       parts: input.parts,
       ts: this.deps.clock.isoNow(),
     };
-    // Deliver peer-to-peer to every resolved recipient (no broker in the path).
+    // Record with the broker FIRST (single durable copy, like broker-mediated
+    // send) so a partial per-recipient delivery failure can't hide the message
+    // from the log/feed.
+    trace("a2a:direct", `send ${m.id} ${m.from}→${m.to}: observe-first (broker records log+feed)`);
+    await this.deps.observer.observe(m);
+    // Deliver peer-to-peer to every resolved recipient (no broker in the path),
+    // best-effort: one unreachable peer must not abort delivery to the others.
     for (const id of this.deps.router.resolve(input.to, input.type)) {
       const card = this.deps.directory.get(id);
-      if (card) await this.deps.endpoints.clientFor(card).sendMessage(m);
+      if (!card) continue;
+      try {
+        trace("a2a:direct", `peer deliver ${m.id} → ${id} (best-effort)`);
+        await this.deps.endpoints.clientFor(card).sendMessage(m);
+      } catch (e) {
+        trace("a2a:direct", `peer deliver ${m.id} → ${id} FAILED (best-effort; log is source of truth)`);
+        console.error(`direct deliver to ${id} failed: ${e instanceof Error ? e.message : e}`);
+      }
     }
-    // One observer copy so the broker's durable log + feed stay complete.
-    await this.deps.observer.observe(m);
     return m;
   }
 }

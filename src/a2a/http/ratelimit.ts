@@ -31,3 +31,14 @@ export function retryAfterMsOf(headers?: Record<string, string>): number | undef
 export function throwIfRateLimited(res: { status: number; headers?: Record<string, string> }): void {
   if (res.status === 429) throw new HttpRateLimitError(retryAfterMsOf(res.headers));
 }
+
+/**
+ * Throw a structured error on any non-2xx response so callers fail loudly with the
+ * status + a body excerpt instead of a misleading `JSON.parse` error on an error
+ * page. Call AFTER {@link throwIfRateLimited} so 429 backoff is unaffected.
+ */
+export function throwIfHttpError(res: { status: number; body: string }): void {
+  if (res.status < 200 || res.status >= 300) {
+    throw new Error(`HTTP ${res.status}: ${res.body.slice(0, 200)}`);
+  }
+}

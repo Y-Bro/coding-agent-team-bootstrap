@@ -12,6 +12,21 @@ const DEFAULT_LAYOUT = "even-horizontal";
  * text (render race), so we type, wait, then submit as a separate keystroke.
  */
 const SUBMIT_DELAY_MS = 400;
+/**
+ * Delay after launching the engine REPL before typing the bootstrap message, so
+ * it lands at the engine's main prompt (past any first-run "trust this folder?"
+ * gate) rather than being consumed by startup.
+ */
+const LAUNCH_SETTLE_MS = 1500;
+
+/**
+ * POSIX single-quote escaping: wrap in `'...'` and replace each embedded `'`
+ * with `'\''`. Makes an untrusted config value (env value / arg) a single inert
+ * shell token so spaces, quotes, and metacharacters (`;`, `$()`) can't break out.
+ */
+function shellQuote(s: string): string {
+  return `'${s.replace(/'/g, "'\\''")}'`;
+}
 
 /** v1 runtime: each agent is a tmux pane; wake = send-keys nudge. */
 export class PanesRuntime implements Runtime {
@@ -45,24 +60,50 @@ export class PanesRuntime implements Runtime {
   async spawn(agent: AgentCard, ctx: SpawnCtx): Promise<void> {
     const p = this.engines.get(agent.engine);
     if (!p) throw new Error(`unknown engine: ${agent.engine}`);
-    const profileEnv = Object.entries(p.env ?? {}).map(([k, v]) => `${k}=${v} `).join("");
-    const args = p.args?.length ? " " + p.args.join(" ") : "";
-    const launch = `TEAM_AGENT_ID=${agent.id} TEAM_SOCKET=${ctx.socketPath} ${profileEnv}${p.command}${args}`;
+    const profileEnv = Object.entries(p.env ?? {}).map(([k, v]) => `${k}=${shellQuote(v)} `).join("");
+    const args = p.args?.length ? " " + p.args.map(shellQuote).join(" ") : "";
+    // Quote env VALUES + args (untrusted config); the command is a trusted binary name.
+    const launch = `TEAM_AGENT_ID=${shellQuote(agent.id)} TEAM_SOCKET=${shellQuote(ctx.socketPath)} ${profileEnv}${p.command}${args}`;
     // Agents sharing a `window` value share one tmux window (each its own pane);
     // an omitted window defaults to the agent id → one window per agent.
     const windowName = ctx.config.agents.find((a) => a.id === agent.id)?.window ?? agent.id;
-    trace("panes", `spawn ${agent.id}: engine=${agent.engine} window=${windowName} workdir=${agent.workdir}`);
-    const paneId = this.placePane(windowName, agent.workdir, ctx.config.layout);
+    // Run the engine at the PROJECT ROOT so it operates on the whole project, not
+    // its near-empty shared/<id> dir. The role file still lives in shared/<id>.
+    trace("panes", `spawn ${agent.id}: engine=${agent.engine} window=${windowName} cwd=PROJECT ROOT ${ctx.projectRoot}`);
+    const paneId = this.placePane(windowName, ctx.projectRoot, ctx.config.layout);
     this.paneIds.set(agent.id, paneId);
     trace("panes", `spawn ${agent.id}: pane=${paneId}; launching`);
     await this.typeAndSubmit(paneId, launch);
+    trace("panes", `spawn ${agent.id}: launch-settle ${LAUNCH_SETTLE_MS}ms before bootstrap message`);
+    await this.sleeper.sleep(LAUNCH_SETTLE_MS);
+    trace("panes", `spawn ${agent.id}: inject bootstrap message (role file + A2A commands + root)`);
+    await this.typeAndSubmit(paneId, this.bootstrapMessage(agent, ctx));
+  }
+
+  /**
+   * One deterministic onboarding line typed after launch: names the agent, points
+   * at its role file (absolute, under shared/<id> — never relies on cwd auto-read,
+   * since cwd is the user's repo root), embeds the exact A2A commands so the engine
+   * never has to discover them, and pins the working directory to the project root.
+   */
+  private bootstrapMessage(agent: AgentCard, ctx: SpawnCtx): string {
+    const p = this.engines.get(agent.engine)!;
+    const roleFilePath = `${agent.workdir}/${p.roleFile}`;
+    const orchestrator = ctx.config.agents[0]?.id ?? agent.id;
+    const exampleTo = agent.id === orchestrator ? "<teammate-id>" : orchestrator;
+    return `You are ${agent.id} (${agent.role}). Read your role guidance now: ${roleFilePath} — follow it. ` +
+      `To read mail: team inbox ${agent.id}. To send: team send --to ${exampleTo} --type <type> --text "...". ` +
+      `Work only inside ${ctx.projectRoot}; never edit any other repo.`;
   }
 
   async wake(agentId: string, summary: string): Promise<void> {
     // Target the stable pane id — tmux automatic-rename breaks session:name.
     const target = this.paneIds.get(agentId) ?? `${this.session}:${agentId}`;
     trace("panes", `wake ${agentId} → pane ${target}: "${summary}"`);
-    await this.typeAndSubmit(target, `# ▶ mail — ${summary} — run: team inbox`);
+    // No leading `#`: Claude Code treats a `#`-prefixed line as "add to memory",
+    // which would swallow the nudge instead of acting on it. Include the agent
+    // id so it can read its own inbox directly (works without AGENT_ID in-pane).
+    await this.typeAndSubmit(target, `▶ new mail (${summary}) — run: team inbox ${agentId} to read and act on it`);
   }
 
   async teardown(): Promise<void> {

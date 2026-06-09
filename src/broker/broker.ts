@@ -73,11 +73,37 @@ export class Broker implements BrokerDispatch, MessageObserver {
       ts: this.deps.clock.isoNow(),
     };
     this.record(m, recipients);
+    await this.deliverAll(m, recipients);
+    return m;
+  }
+
+  /**
+   * Emit a fully-formed broker-internal message (e.g. a sweep policy flag /
+   * escalation) through the SAME path as a normal send, so it is visible in
+   * team inbox + feed (and wakes the recipient), not just the durable log.
+   */
+  async emitInternal(m: Message): Promise<void> {
+    const recipients = this.safeResolve(m.to, m.type);
+    trace("broker", `emitInternal ${m.id} from=${m.from} to=${m.to} type=${m.type} → recipients=[${recipients.join(", ") || "none"}]`);
+    this.record(m, recipients);
+    await this.deliverAll(m, recipients);
+  }
+
+  /** Best-effort wake/forward to each recipient over the transport. */
+  private async deliverAll(m: Message, recipients: string[]): Promise<void> {
     for (const id of recipients) {
       const card = this.deps.registry.get(id);
-      if (card) { trace("broker", `transport.deliver ${m.id} → ${id}`); await this.deps.transport.deliver(card, m); }
+      if (!card) continue;
+      try {
+        trace("broker", `transport.deliver ${m.id} → ${id} (best-effort wake)`);
+        await this.deps.transport.deliver(card, m);
+      } catch (e) {
+        // At-least-once: the message is already in the inbox (source of truth);
+        // a failed wake is best-effort and must not abort the send or other recipients.
+        trace("broker", `deliver ${m.id} → ${id} FAILED (best-effort; inbox is source of truth)`);
+        console.error(`deliver to ${id} failed: ${e instanceof Error ? e.message : e}`);
+      }
     }
-    return m;
   }
 
   /**
@@ -119,9 +145,10 @@ export class Broker implements BrokerDispatch, MessageObserver {
     this.inboxes.clear();
     for (const m of this.deps.store.replay()) {
       if (m.type === ACK_EVENT_TYPE) {
-        const { agentId, ids } = m.parts.find((p) => p.kind === "data")?.data as { agentId: string; ids: string[] };
-        const drop = new Set(ids);
-        this.inboxes.set(agentId, (this.inboxes.get(agentId) ?? []).filter((x) => !drop.has(x.id)));
+        const data = m.parts.find((p) => p.kind === "data")?.data as { agentId?: unknown; ids?: unknown } | undefined;
+        if (!data || typeof data.agentId !== "string" || !Array.isArray(data.ids)) continue; // skip a malformed ack
+        const drop = new Set(data.ids as string[]);
+        this.inboxes.set(data.agentId, (this.inboxes.get(data.agentId) ?? []).filter((x) => !drop.has(x.id)));
         continue;
       }
       for (const id of this.safeResolve(m.to, m.type)) this.deliver(id, m);

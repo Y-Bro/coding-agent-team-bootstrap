@@ -31,7 +31,7 @@ const card = (over: Partial<AgentCard>): AgentCard => ({
   id: "a", role: "writer", cli: "codex", engine: "srv",
   capabilities: [], skills: [], workdir: "work", subscribes: [], ...over,
 });
-const ctx = { config: {} as any, socketPath: ".team/broker.sock" };
+const ctx = { config: {} as any, socketPath: ".team/broker.sock", projectRoot: "/proj" };
 
 test("spawn launches the engine process, registers the card", async () => {
   const spawner = new FakeSpawner();
@@ -42,7 +42,8 @@ test("spawn launches the engine process, registers the card", async () => {
   assert.equal(spawner.launches.length, 1);
   assert.equal(spawner.launches[0]!.command, "srv-bin");
   assert.equal(spawner.launches[0]!.env!.TEAM_AGENT_ID, "fe");
-  assert.equal(spawner.launches[0]!.cwd, "work");
+  // runs at the project root (parity with panes), not the agent's shared workdir
+  assert.equal(spawner.launches[0]!.cwd, "/proj");
   assert.deepEqual(link.registered, ["fe"]);
 });
 

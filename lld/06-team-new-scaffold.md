@@ -34,7 +34,7 @@ sequenceDiagram
   RSC->>WZ: step1 runWizard(prompter,engines,available)
   WZ-->>RSC: {name, runtime, agents:[{id,role,engine}]}
   RSC->>LP: step2 plan(agents) → windows + per-window layout
-  RSC->>RSC: step3 assemble cfg: root:".", workdir:shared/<id>,\nwindow, subscribes (hub=agents[0]→all types, spokes→[])
+  RSC->>RSC: step3 assemble cfg: root:".", workdir:shared/<id>,\nwindow, subscribes (hub=agents[0]→all types, spokes→[task_assignment])
   RSC->>SC: TeamConfigSchema.parse(cfg)   (validate)
   RSC->>FS: writeConfigYaml(out, cfg)
   RSC->>CS: step4 scaffold(name, scaffoldAgents, base=dirname(out))
@@ -71,12 +71,15 @@ sequenceDiagram
   claude `["-p"]`, codex `["exec"]`, cursor-agent `["-p"]`.
 - **Generator selection.** `cfg.scaffold.generator` (default `claude`, validated
   against the engine set). `--no-guidance` swaps in a NULL generator (no spawn).
-- **Per-agent workdir.** Every agent gets `workdir: shared/<id>` so two agents on
-  the same engine don't collide on one `CLAUDE.md`; the team still operates on the
-  whole project (`root: "."`).
+- **Per-agent workdir + run at root.** Every agent's *role file* lives at
+  `workdir: shared/<id>` (so two agents on the same engine don't collide on one
+  `CLAUDE.md`), but the engine is **launched at the project root** (`root: "."`,
+  `SpawnCtx.projectRoot`) so it operates on the whole project, not its near-empty
+  `shared/<id>` dir.
 - **Hub-and-spoke subscriptions.** `agents[0]` (orchestrator) subscribes to ALL
-  `DEFAULT_MESSAGE_TYPES`; every other agent to `[]`. So type-based fan-out flows
-  through the hub (direct `--to <id>` still works regardless).
+  `DEFAULT_MESSAGE_TYPES`; every other (spoke) agent subscribes to
+  `["task_assignment"]` — so a broadcast `task_assignment` reaches every spoke,
+  while replies/status flow back through the hub. Direct `--to <id>` always works.
 - **Overwrite guard.** Existing `out` + no `--force` → prompt (default no) and
   abort; `--yes` keeps the existing file (short-circuited in `bin/team.ts`);
   `--force` overwrites.

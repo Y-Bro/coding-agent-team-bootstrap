@@ -80,14 +80,23 @@ From `buildContainer` top to bottom (`src/compose.ts`):
 8. **`broker`** = `makeBroker(transport)`.
 9. **Task projection:** `TaskMachine(store,clock,ids)` + `TaskProjector`;
    `bus.subscribe(m => projector.handle(m))`; `taskMachine.rebuild()`.
-10. **Sweep:** `emit = m => { store.append(m); bus.publish(m); }`; `lead =
-    cfg.agents[0].id`; `SweepLoop` with `StallPolicy` + `DeadLetterPolicy`.
+10. **Sweep:** `emit = m => broker.emitInternal(m)` — flag/escalation events now
+    flow through the SAME delivery path as a normal send (record → log + feed +
+    inbox + publish, then best-effort wake), not a bare `store.append + publish`.
+    `lead = cfg.agents[0].id`; `SweepLoop` with `StallPolicy` + `DeadLetterPolicy`.
 11. **`runtime`** = `selectRuntime(...)` — assigns the `let runtime` the waker
     closed over, so the socket waker now resolves.
 12. **`messenger`** (only `delivery:direct`): `DirectMessenger` for peer-to-peer.
 13. **`daemon`** = `BrokerDaemon(broker, NodeSocketServer)`; **`bootstrapper`** =
-    `Bootstrapper(cfg, {...})`.
+    `Bootstrapper(cfg, {...})`. The bootstrapper threads `projectRoot =
+    dirname(teamDir)` into every `runtime.spawn` (see `SpawnCtx.projectRoot`), so
+    panes/servers launch the engine at the project root, not `shared/<id>`.
 14. **`dashboard`** (opt-in): `DashboardServer` subscribed to the bus.
+
+**Shared validation.** `src/a2a/http/rpc-validate.ts` holds the single JSON-RPC
+shape validator reused by the A2A HTTP server for both `message/send` and
+`message/stream` (no duplicated per-method parsing). **Shared `RealSleeper`** is
+threaded into the sweep loop, the fleet scheduler, AND the panes runtime.
 
 ## Pseudocode skeleton (Python)
 
@@ -117,7 +126,7 @@ def build_container(cfg, templates):
     bus.subscribe(TaskProjector(tm).handle)
     tm.rebuild()
 
-    emit = lambda m: (store.append(m), bus.publish(m))
+    emit = lambda m: broker.emit_internal(m)   # same path as send: record + best-effort wake
     sweep = SweepLoop(clock, sleeper, cfg.timers.sweep_interval_ms, policies=[
         StallPolicy(store, cfg.timers.stall_ms, waker=runtime_ref, emit=emit, ids=ids),
         DeadLetterPolicy(store, cfg.timers.dead_letter_ms, lead=cfg.agents[0].id, emit=emit, ids=ids),

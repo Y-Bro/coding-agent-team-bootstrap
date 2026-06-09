@@ -13,7 +13,7 @@ import { DirectMessenger, type Messenger } from "./a2a/direct.ts";
 import { staticDiscoveryFromConfig, stampUrl, type DiscoveryProvider } from "./a2a/discovery.ts";
 import { BrokerAuthProvider, InProcessSecret, bearerHeader } from "./a2a/http/auth.ts";
 import { randomBytes } from "node:crypto";
-import { throwIfRateLimited } from "./a2a/http/ratelimit.ts";
+import { throwIfRateLimited, throwIfHttpError } from "./a2a/http/ratelimit.ts";
 import { NodeHttpClient, NodeHttpServer, type TlsClientOptions } from "./ports/http.ts";
 import { MemoryBus } from "./broker/bus.ts";
 import { TaskMachine } from "./broker/tasks.ts";
@@ -88,6 +88,7 @@ function a2aWebhook(discovery: DiscoveryProvider, tokenFor?: TokenFor, clientTls
         headers: token !== undefined ? bearerHeader(token) : undefined,
       });
       throwIfRateLimited(res); // a 429 from the agent webhook drives scheduler backoff
+      throwIfHttpError(res); // any other non-2xx (e.g. 404/500) surfaces, not silently dropped
     },
   };
 }
@@ -207,14 +208,18 @@ export function buildContainer(cfg: TeamConfig, templates: Record<string, string
   // (observer only, never in the delivery path). rebuild() restores state from the
   // persisted task_status log before live events flow.
   const taskMachine = new TaskMachine(store, clock, ids);
-  const taskProjector = new TaskProjector(taskMachine);
+  // Resolve task ownership to a concrete agent id (not a route token like a role)
+  // via the same router the broker uses; resolution errors fall back to m.to.
+  const ownerRouter = new Router(registry);
+  const taskProjector = new TaskProjector(taskMachine, (to, type) => ownerRouter.resolve(to, type));
   bus.subscribe((m) => taskProjector.handle(m));
   trace("compose", "task projector subscribed to bus; rebuilding task state from log");
   taskMachine.rebuild();
 
-  // Liveness sweep: one Clock/Sleeper loop, two policies. `emit` appends to the
-  // log AND publishes to the bus so flags/escalations are durable and observable.
-  const emit = (m: Message) => { store.append(m); void bus.publish(m); };
+  // Liveness sweep: one Clock/Sleeper loop, two policies. Route sweep flags/
+  // escalations through the broker's normal delivery path so they land in
+  // inboxes + feed (and wake the recipient), not just the durable log.
+  const emit = (m: Message) => { void broker.emitInternal(m); };
   const isoOf = (d: Date) => d.toISOString();
   const lead = cfg.agents[0]!.id; // convention: first agent is the lead/owner of escalations
   const sweep = new SweepLoop({
@@ -406,9 +411,10 @@ export async function runScaffoldCommand(opts: ScaffoldOptions, deps: ScaffoldDe
   );
 
   // Hub-and-spoke: the orchestrator (first agent, index 0 — the cfg.agents[0]
-  // convention DeadLetterPolicy already uses) hears ALL message types; every
-  // other agent subscribes to none, so type-based fan-out flows through the hub.
-  const subsFor = (i: number): string[] => (i === 0 ? [...DEFAULT_MESSAGE_TYPES] : []);
+  // convention DeadLetterPolicy already uses) hears ALL message types; spokes
+  // hear the orchestrator's task assignments (so the wiring is visible and the
+  // lead can broadcast an assignment), while other traffic flows through the hub.
+  const subsFor = (i: number): string[] => (i === 0 ? [...DEFAULT_MESSAGE_TYPES] : ["task_assignment"]);
 
   // 3) assemble config (fills existing window/layout fields; root anchors here)
   const cfg: Record<string, unknown> = {

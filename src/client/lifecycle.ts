@@ -47,7 +47,15 @@ export async function teamUp(
   trace("lifecycle", `teamUp: daemon.start(${socket})`);
   await daemon.start(socket);
   trace("lifecycle", "teamUp: bootstrapper.up (worktrees → cards → register → spawn)");
-  await bootstrapper.up(socket);
+  try {
+    await bootstrapper.up(socket);
+  } catch (e) {
+    // Partial bring-up: stop the daemon and clear the pidfile/socket so a failed
+    // `team up` leaves no stale daemon/socket to poison the next run, then re-throw.
+    trace("lifecycle", "teamUp: bootstrap FAILED → ROLLBACK (daemon.stop + cleanup pidfile/socket)");
+    try { await daemon.stop(); } finally { cleanup(deps); }
+    throw e;
+  }
   deps.fs.write(deps.pidfile, String(deps.proc.pid));
   trace("lifecycle", `teamUp: wrote pidfile ${deps.pidfile}=${deps.proc.pid}; staying alive`);
   deps.proc.onShutdown(() => {

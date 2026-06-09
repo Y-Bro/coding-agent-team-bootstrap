@@ -31,30 +31,40 @@ no real timers. `intervalMs = cfg.timers.sweepIntervalMs` (default 30s).
 interface SweepPolicy { run(now: Date): void }
 ```
 
-Both policies are constructed with `emit = (m) => { store.append(m); bus.publish(m) }`
-(from `compose.ts`) so every flag/escalation is durable AND observable.
+Both policies are constructed with `emit = (m) => broker.emitInternal(m)` (from
+`compose.ts`). `emitInternal` routes the flag/escalation through the broker's
+normal path — `record` (log + feed + inbox + publish) then best-effort `wake` — so
+every flag/escalation is durable, observable, AND lands in the recipient's
+`team inbox` + `feed.md`, not just the raw log.
 
 ## StallPolicy — re-nudge stuck tasks (`policies/stall.ts`)
 
 ```mermaid
 flowchart TD
-  R["run(now)"] --> SCAN["replay() → latest task_status per task (state, owner, ts)"]
+  R["run(now)"] --> SCAN["replay() → latest task_status per task + latest stall_flag ts per task"]
   SCAN --> LOOP{"for each task"}
   LOOP --> ST{"state == 'working'?"}
   ST -- no --> LOOP
   ST -- yes --> AGE{"now - ts > stallMs?"}
   AGE -- no --> LOOP
-  AGE -- yes --> NUDGE["waker.wake(owner, 'task X stalled')"]
+  AGE -- yes --> GUARD{"flaggedAt[task] > task.ts?  (once-guard)"}
+  GUARD -- yes --> LOOP
+  GUARD -- no --> NUDGE["waker.wake(owner, 'task X stalled')"]
   NUDGE --> EMIT["emit stall_flag{to:owner}"]
   EMIT --> LOOP
 ```
 
-- Builds the latest state/owner/ts per task by folding `task_status` events.
-- A task **latest in `working`** longer than `stallMs` (default 10 min) →
-  `runtime.wake(owner, …)` (the same waker the broker uses) AND a durable
-  `stall_flag`.
-- Self-resetting: any newer `task_status` (e.g. progress) moves `ts` forward, so
-  the window restarts. Re-flagging within a still-stalled window is acceptable.
+- Builds the latest state/owner/ts per task by folding `task_status` events, AND
+  the latest `stall_flag` ts per task (the durable once-guard).
+- A task **latest in `working`** longer than `stallMs` (default 10 min), and NOT
+  already flagged for this window → `runtime.wake(owner, …)` (the same waker the
+  broker uses) AND a durable `stall_flag`.
+- **Once per window:** a `stall_flag` emitted *after* the task's latest
+  `task_status` (`flaggedAt[task] > t.ts`) means this stall window is already
+  flagged → skip (no re-nudge every tick). The guard is durable — it survives
+  restart because it is rebuilt from `stall_flag` events in the log.
+- Self-resetting: any newer `task_status` (e.g. progress) moves `t.ts` forward,
+  so the window restarts and a later re-flag is allowed.
 
 ## DeadLetterPolicy — escalate unanswered review requests (`policies/dead-letter.ts`)
 

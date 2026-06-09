@@ -17,13 +17,22 @@ export class JsonlStore implements MessageStore {
 
   replay(): Message[] {
     if (!this.fs.exists(this.path)) return [];
-    const msgs = this.fs
-      .read(this.path)
-      .split("\n")
-      .filter((l) => l.trim() !== "")
-      .map((l) => JSON.parse(l))
-      .filter(isMessage);
-    trace("store", `replay ${this.path} → ${msgs.length} messages`);
-    return msgs;
+    const out: Message[] = [];
+    for (const line of this.fs.read(this.path).split("\n")) {
+      if (line.trim() === "") continue;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        // A single corrupt line (e.g. a partial write from a crash) must not block
+        // the whole rebuild — skip it and keep replaying the rest of the log.
+        trace("store", "skip corrupt JSONL line during replay (best-effort)");
+        console.error("store: skipping malformed JSONL line during replay");
+        continue;
+      }
+      if (isMessage(parsed)) out.push(parsed);
+    }
+    trace("store", `replay ${this.path} → ${out.length} messages`);
+    return out;
   }
 }

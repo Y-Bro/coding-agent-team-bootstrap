@@ -5,7 +5,7 @@ import {
   type JsonRpcRequest, type JsonRpcResponse, type MessageSendParams, type MessageSendResult,
 } from "./types.ts";
 import { bearerHeader } from "./auth.ts";
-import { throwIfRateLimited } from "./ratelimit.ts";
+import { throwIfRateLimited, throwIfHttpError } from "./ratelimit.ts";
 
 /**
  * Client for one remote agent's A2A-over-HTTP endpoint: fetch its AgentCard and
@@ -18,7 +18,8 @@ export class A2AClient {
 
   async fetchAgentCard(): Promise<AgentCard> {
     const res = await this.http.request(this.baseUrl + A2A_PATHS.agentCard, { method: "GET" });
-    if (res.status !== 200) throw new Error(`agent card fetch failed (${res.status})`);
+    throwIfRateLimited(res);
+    throwIfHttpError(res);
     return JSON.parse(res.body) as AgentCard;
   }
 
@@ -31,6 +32,7 @@ export class A2AClient {
       headers: this.token !== undefined ? bearerHeader(this.token) : undefined,
     });
     throwIfRateLimited(res); // surface HTTP 429 so the FleetScheduler backs off
+    throwIfHttpError(res); // any other non-2xx fails loudly with status, not a JSON.parse error
     const rpc = JSON.parse(res.body) as JsonRpcResponse<MessageSendResult>;
     if ("error" in rpc) throw new Error(rpc.error.message);
     return rpc.result.message;
