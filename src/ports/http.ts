@@ -68,7 +68,7 @@ export class NodeHttpServer implements HttpServer, SseServer {
   }
 
   listen(port: number): Promise<void> {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       const onRequest = (req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse) => {
         const path = (req.url ?? "/").split("?")[0] ?? "/";
         const onConnect = (req.method ?? "GET").toUpperCase() === "GET" ? this.sseRoutes.get(path) : undefined;
@@ -92,18 +92,34 @@ export class NodeHttpServer implements HttpServer, SseServer {
             if (!handler) { res.statusCode = 404; res.end(""); return; }
             const reqHeaders: Record<string, string> = {};
             for (const [k, v] of Object.entries(req.headers)) reqHeaders[k] = Array.isArray(v) ? v.join(", ") : (v ?? "");
-            const out = await handler({ method: req.method ?? "GET", path, body: Buffer.concat(chunks).toString(), headers: reqHeaders });
-            res.statusCode = out.status;
-            const resHeaders = out.headers ?? { "content-type": "application/json" };
-            for (const [k, v] of Object.entries(resHeaders)) res.setHeader(k, v);
-            res.end(out.body);
+            try {
+              const out = await handler({ method: req.method ?? "GET", path, body: Buffer.concat(chunks).toString(), headers: reqHeaders });
+              res.statusCode = out.status;
+              const resHeaders = out.headers ?? { "content-type": "application/json" };
+              for (const [k, v] of Object.entries(resHeaders)) res.setHeader(k, v);
+              res.end(out.body);
+            } catch (e) {
+              // A throwing handler must not hang the request or unhandled-reject:
+              // respond 500 with a JSON error body.
+              console.error(`http handler error (${path}): ${e instanceof Error ? e.message : e}`);
+              res.statusCode = 500;
+              res.setHeader("content-type", "application/json");
+              res.end(JSON.stringify({ error: "internal error" }));
+            }
           })();
         });
       };
       this.server = this.tls
         ? createHttpsServer({ cert: this.tls.cert, key: this.tls.key, ca: this.tls.ca }, onRequest)
         : createServer(onRequest);
-      this.server.listen(port, () => resolve());
+      // A bind failure (e.g. EADDRINUSE) must reject the listen promise rather
+      // than emit an unhandled 'error' that crashes the process.
+      const onListenError = (err: unknown) => reject(err);
+      this.server.once("error", onListenError);
+      this.server.listen(port, () => {
+        this.server!.removeListener("error", onListenError);
+        resolve();
+      });
     });
   }
 
