@@ -56,7 +56,10 @@ export class PanesRuntime implements Runtime {
   async wake(agentId: string, summary: string): Promise<void> {
     // Target the stable pane id — tmux automatic-rename breaks session:name.
     const target = this.paneIds.get(agentId) ?? `${this.session}:${agentId}`;
-    await this.typeAndSubmit(target, `# ▶ mail — ${summary} — run: team inbox`);
+    // No leading `#`: Claude Code treats a `#`-prefixed line as "add to memory",
+    // which would swallow the nudge instead of acting on it. Include the agent
+    // id so it can read its own inbox directly (works without AGENT_ID in-pane).
+    await this.typeAndSubmit(target, `▶ new mail (${summary}) — run: team inbox ${agentId} to read and act on it`);
   }
 
   async teardown(): Promise<void> {
