@@ -57,6 +57,15 @@ test("panes team up registers the roster: team ps lists agents and send/inbox ro
     assert.match(ps.stdout, /alpha/);
     assert.match(ps.stdout, /beta/);
 
+    // Each agent's pane is opened sequentially with a launch-settle delay, so the
+    // roster socket can be up before beta's pane exists. Wait for beta's window so
+    // the wake `send-keys` has a target (else `team send` fails routing the nudge).
+    for (let i = 0; i < 60; i++) {
+      const wins = spawnSync("tmux", ["list-windows", "-t", "smoke2", "-F", "#{window_name}"], { encoding: "utf8" });
+      if (/(^|\n)beta(\n|$)/.test(wins.stdout)) break;
+      await sleep(100);
+    }
+
     // alpha sends a note to beta; beta's inbox receives it (routing works).
     const sent = runVerb(dir, ["send", "--to", "beta", "--type", "note", "hello beta"], "alpha");
     assert.equal(sent.status, 0, `send failed: ${sent.stderr}`);

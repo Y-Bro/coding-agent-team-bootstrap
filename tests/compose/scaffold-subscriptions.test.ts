@@ -8,7 +8,7 @@ import { runScaffoldCommand } from "../../src/compose.ts";
 import { ScriptedPrompter } from "../../src/ports/prompter.ts";
 import { DEFAULT_MESSAGE_TYPES } from "../../src/a2a/index.ts";
 
-test("first agent (orchestrator) subscribes to all types; others subscribe to none", async () => {
+test("first agent (orchestrator) subscribes to all types; spokes subscribe to task_assignment", async () => {
   const dir = mkdtempSync(join(tmpdir(), "subs-"));
   const out = join(dir, "team.yaml");
   // custom shape: 3 agents, all claude. answers: name, runtime(1), preset(4=custom),
@@ -26,14 +26,15 @@ test("first agent (orchestrator) subscribes to all types; others subscribe to no
   const boss = cfg.agents.find((a: any) => a.id === "boss");
   const a1 = cfg.agents.find((a: any) => a.id === "a1");
   assert.deepEqual([...boss.subscribes].sort(), [...DEFAULT_MESSAGE_TYPES].sort());
-  assert.deepEqual(a1.subscribes, []);
+  // spokes hear the orchestrator's assignments (visible hub-and-spoke wiring)
+  assert.deepEqual(a1.subscribes, ["task_assignment"]);
 
   // The scaffoldAgents side must match: the orchestrator's wiring footer lists
-  // the default types it receives; a spoke's footer says "(none)". noGuidance
-  // makes these footer-only files.
+  // the default types it receives; a spoke's footer lists task_assignment.
+  // noGuidance makes these footer-only files.
   const bossMd = readFileSync(join(dir, "shared/boss/CLAUDE.md"), "utf8");
   assert.match(bossMd, /## How to communicate/);
   assert.match(bossMd, new RegExp(`You receive messages of type: ${[...DEFAULT_MESSAGE_TYPES].join(", ")}\\.`));
   const a1Md = readFileSync(join(dir, "shared/a1/CLAUDE.md"), "utf8");
-  assert.match(a1Md, /You receive messages of type: \(none\)\./);
+  assert.match(a1Md, /You receive messages of type: task_assignment\./);
 });

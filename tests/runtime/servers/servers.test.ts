@@ -31,7 +31,7 @@ const card = (over: Partial<AgentCard>): AgentCard => ({
   id: "a", role: "writer", cli: "codex", engine: "srv",
   capabilities: [], skills: [], workdir: "work", subscribes: [], ...over,
 });
-const ctx = { config: {} as any, socketPath: ".team/broker.sock" };
+const ctx = { config: {} as any, socketPath: ".team/broker.sock", projectRoot: "/proj" };
 
 test("spawn launches the engine process, registers the card", async () => {
   const spawner = new FakeSpawner();

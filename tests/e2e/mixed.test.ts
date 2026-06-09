@@ -62,7 +62,7 @@ test("mixed team: messages cross the pane<->server boundary in both directions",
     broker.register(toCard(pw));
     broker.register(toCard(sr));
     // The pane agent runs in a REAL tmux pane (so server->pane wake has a target).
-    await runtime.spawn(toCard(pw), { config: cfg, socketPath: cfg.broker.socket });
+    await runtime.spawn(toCard(pw), { config: cfg, socketPath: cfg.broker.socket, projectRoot: "." });
 
     // pane -> server: must traverse real loopback HTTP to the server's webhook.
     await broker.send({ from: "pw", to: "sr", type: "review_request", parts: [{ kind: "text", text: "PR #7" }] });

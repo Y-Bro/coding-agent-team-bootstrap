@@ -38,7 +38,7 @@ const card: AgentCard = { id: "fe-writer", role: "writer", cli: "claude", engine
 function cfgWith(agents: Array<{ id: string; window?: string }>, layout: Record<string, string> = {}): TeamConfig {
   return { agents: agents.map((a) => ({ id: a.id, window: a.window })), layout } as unknown as TeamConfig;
 }
-function ctx(config: TeamConfig): SpawnCtx { return { config, socketPath: "/tmp/s.sock" }; }
+function ctx(config: TeamConfig): SpawnCtx { return { config, socketPath: "/tmp/s.sock", projectRoot: "/proj" }; }
 
 test("wake sends a one-line nudge into the agent's pane", async () => {
   const tmux = new SpyTmux();
@@ -95,10 +95,10 @@ test("agents sharing a window become panes in ONE window via split-window + sele
   // a layout is applied to the shared window after the split (default even-horizontal)
   const layout = tmux.calls.find((c) => c[0] === "select-layout")!;
   assert.deepEqual(layout, ["select-layout", "-t", "@1", "even-horizontal"]);
-  // each agent targets its own pane (the literal-text send-keys, one per agent)
+  // each agent now emits launch + bootstrap (2 literal-text sends); both target its own pane
   const textSends = tmux.calls.filter((c) => c[0] === "send-keys" && c.includes("-l"));
-  assert.deepEqual([textSends[0]![1], textSends[0]![2]], ["-t", "%1"]);
-  assert.deepEqual([textSends[1]![1], textSends[1]![2]], ["-t", "%2"]);
+  const targets = textSends.map((c) => c[c.indexOf("-t") + 1]);
+  assert.deepEqual(targets, ["%1", "%1", "%2", "%2"], "agent a (launch+bootstrap) then agent b");
 });
 
 test("select-layout uses the configured layout for the window", async () => {
