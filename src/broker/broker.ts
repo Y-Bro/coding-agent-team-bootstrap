@@ -90,7 +90,14 @@ export class Broker implements BrokerDispatch, MessageObserver {
   private async deliverAll(m: Message, recipients: string[]): Promise<void> {
     for (const id of recipients) {
       const card = this.deps.registry.get(id);
-      if (card) await this.deps.transport.deliver(card, m);
+      if (!card) continue;
+      try {
+        await this.deps.transport.deliver(card, m);
+      } catch (e) {
+        // At-least-once: the message is already in the inbox (source of truth);
+        // a failed wake is best-effort and must not abort the send or other recipients.
+        console.error(`deliver to ${id} failed: ${e instanceof Error ? e.message : e}`);
+      }
     }
   }
 

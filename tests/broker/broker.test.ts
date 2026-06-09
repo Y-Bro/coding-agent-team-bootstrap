@@ -11,7 +11,10 @@ import type { AgentCard, Message } from "../../src/a2a/index.ts";
 
 class SpyTransport implements Transport {
   delivered: Array<{ id: string; type: string; from: string }> = [];
+  /** When set, deliver() throws for this recipient id (simulates a down/unreachable agent). */
+  failFor?: string;
   async deliver(recipient: AgentCard, message: Message): Promise<void> {
+    if (recipient.id === this.failFor) throw new Error(`transport down for ${recipient.id}`);
     this.delivered.push({ id: recipient.id, type: message.type, from: message.from });
   }
   async listen(): Promise<void> {}
@@ -71,6 +74,22 @@ test("emitInternal records to inbox + feed + delivers (sweep parity)", async () 
   assert.match(fs.read(".team/feed.md"), /dead letter/);
   assert.match(fs.read(".team/messages.jsonl"), /m-int-1/);
   assert.ok(transport.delivered.some((d) => d.id === "lead"), "delivered/woken");
+});
+
+test("send tolerates a transport failure for one recipient (at-least-once; inbox is source of truth)", async () => {
+  const transport = new SpyTransport();
+  transport.failFor = "a"; // a's wake throws; b's succeeds
+  const { broker } = makeBroker(transport);
+  broker.register(card({ id: "a", role: "pair" }));
+  broker.register(card({ id: "b", role: "pair" }));
+
+  // addressing the shared role resolves BOTH a and b
+  const m = await broker.send({ from: "x", to: "pair", type: "note", parts: [{ kind: "text", text: "hi" }] });
+
+  // message is still durable + in BOTH inboxes despite a's transport failing, and send did not throw
+  assert.ok(broker.peek("a").some((x) => x.id === m.id), "in a's inbox despite failed wake");
+  assert.ok(broker.peek("b").some((x) => x.id === m.id), "in b's inbox");
+  assert.ok(transport.delivered.some((d) => d.id === "b"), "b still delivered after a failed");
 });
 
 test("peek is non-destructive; ack removes only acked ids", async () => {
