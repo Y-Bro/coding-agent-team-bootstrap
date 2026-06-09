@@ -44,7 +44,14 @@ export async function teamUp(
   deps: LifecycleDeps,
 ): Promise<void> {
   await daemon.start(socket);
-  await bootstrapper.up(socket);
+  try {
+    await bootstrapper.up(socket);
+  } catch (e) {
+    // Partial bring-up: stop the daemon and clear the pidfile/socket so a failed
+    // `team up` leaves no stale daemon/socket to poison the next run, then re-throw.
+    try { await daemon.stop(); } finally { cleanup(deps); }
+    throw e;
+  }
   deps.fs.write(deps.pidfile, String(deps.proc.pid));
   deps.proc.onShutdown(() => {
     void (async () => {

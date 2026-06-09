@@ -1,5 +1,5 @@
 import { createServer, createConnection, type Server, type Socket } from "node:net";
-import { existsSync, unlinkSync, mkdirSync } from "node:fs";
+import { existsSync, unlinkSync, mkdirSync, chmodSync } from "node:fs";
 import { dirname } from "node:path";
 
 export interface SocketServer {
@@ -36,8 +36,12 @@ export class NodeSocketServer implements SocketServer {
 
   async listen(path: string, onMessage: (msg: unknown, reply: (r: unknown) => void) => void): Promise<void> {
     // Ensure the socket's parent dir (e.g. .team/) exists — on a fresh clone it
-    // doesn't, and binding would otherwise crash with ENOENT/EACCES.
-    mkdirSync(dirname(path), { recursive: true });
+    // doesn't, and binding would otherwise crash with ENOENT/EACCES. Restrict it
+    // to the owner (0700) so the broker socket isn't world-traversable.
+    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+    // mkdirSync's mode only applies to a NEWLY created dir; tighten a pre-existing
+    // .team (e.g. left 0755 by an earlier run) too. Best-effort, like the socket chmod.
+    try { chmodSync(dirname(path), 0o700); } catch { /* unsupported FS/platform */ }
 
     // Stale-socket handling: if the path exists, a live owner means we refuse
     // (clear error); a dead leftover from a crash is unlinked so we can bind.
@@ -76,6 +80,9 @@ export class NodeSocketServer implements SocketServer {
       server.once("error", onListenError);
       server.listen(path, () => {
         server.removeListener("error", onListenError);
+        // Restrict the socket to the owner (0600) so other local users can't
+        // connect to the broker. Best-effort: platforms without chmod just skip.
+        try { chmodSync(path, 0o600); } catch { /* unsupported FS/platform */ }
         // Keep a persistent handler so a later socket error never crashes the daemon.
         server.on("error", (e) => console.error(`broker socket error: ${e instanceof Error ? e.message : e}`));
         resolve();

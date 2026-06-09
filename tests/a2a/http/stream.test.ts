@@ -81,6 +81,25 @@ test("with auth: message/stream accepts a valid bearer and rejects missing/inval
   assert.equal(JSON.parse(badAuth.body).error.code, JSON_RPC_ERRORS.unauthorized);
 });
 
+test("message/stream validates the JSON-RPC envelope like message/send (structured error, not empty 400)", async () => {
+  const server = new FakeHttpServer();
+  registerStreamRoute(server, { onMessageStream: () => [{ event: "done", data: { ok: true } }] });
+
+  // missing jsonrpc/method -> invalidRequest JSON-RPC error (object body), not an empty 400
+  const badEnvelope = await server.handle({
+    method: "POST", path: A2A_PATHS.rpcStream,
+    body: JSON.stringify({ id: 1, params: { message: msg } }),
+  });
+  assert.equal(JSON.parse(badEnvelope.body).error.code, JSON_RPC_ERRORS.invalidRequest);
+
+  // a non-message params.message -> invalidParams (not passed through to the handler)
+  const badParams = await server.handle({
+    method: "POST", path: A2A_PATHS.rpcStream,
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "message/stream", params: { message: { id: "x", from: "a" } } }),
+  });
+  assert.equal(JSON.parse(badParams.body).error.code, JSON_RPC_ERRORS.invalidParams);
+});
+
 test("the stream route serves content-type text/event-stream", async () => {
   const server = new FakeHttpServer();
   registerStreamRoute(server, { onMessageStream: () => [{ data: 1 }] });

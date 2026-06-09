@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { tmpdir } from "node:os";
-import { mkdtempSync, writeFileSync, existsSync } from "node:fs";
+import { mkdtempSync, writeFileSync, existsSync, statSync, mkdirSync, chmodSync } from "node:fs";
 import { join } from "node:path";
 import { createConnection } from "node:net";
 import { BrokerDaemon } from "../../src/broker/daemon.ts";
@@ -71,6 +71,45 @@ test("listen creates the socket's parent dir on a fresh clone (no .team present)
   }
   assert.equal(existsSync(path), true, "socket bound under the freshly-created .team/");
   await server.close();
+});
+
+test("the broker socket is created 0600 and its parent dir 0700 (L3)", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "team-perm-"));
+  const subdir = join(root, ".team");      // created by listen()
+  const path = join(subdir, "broker.sock");
+  const server = new NodeSocketServer();
+  try {
+    await server.listen(path, () => {});
+  } catch (e) {
+    if (isSandboxNetError(e)) { t.skip("loopback socket blocked under sandbox"); return; }
+    throw e;
+  }
+  try {
+    assert.equal(statSync(path).mode & 0o777, 0o600, "socket restricted to owner rw");
+    assert.equal(statSync(subdir).mode & 0o777, 0o700, "socket dir restricted to owner");
+  } finally {
+    await server.close();
+  }
+});
+
+test("listen tightens a PRE-EXISTING world-traversable socket dir to 0700 (L4 follow-up)", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "team-perm2-"));
+  const subdir = join(root, ".team");
+  mkdirSync(subdir);          // pre-exists, so mkdirSync's mode option won't apply
+  chmodSync(subdir, 0o755);   // left world-traversable by a prior run
+  const path = join(subdir, "broker.sock");
+  const server = new NodeSocketServer();
+  try {
+    await server.listen(path, () => {});
+  } catch (e) {
+    if (isSandboxNetError(e)) { t.skip("loopback socket blocked under sandbox"); return; }
+    throw e;
+  }
+  try {
+    assert.equal(statSync(subdir).mode & 0o777, 0o700, "existing socket dir tightened to owner-only");
+  } finally {
+    await server.close();
+  }
 });
 
 test("a malformed JSON frame does not crash the server; a later valid frame still works", async (t) => {

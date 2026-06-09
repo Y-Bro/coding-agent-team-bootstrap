@@ -17,14 +17,23 @@ export interface StallDeps {
 }
 
 /** Re-nudges the owner of any task that has been `working` longer than stallMs,
- * and emits a `stall_flag` event. Idempotent per stall window is acceptable —
- * a fresh task_status (e.g. on progress) resets the clock. */
+ * and emits a `stall_flag` event ONCE per stall window. The once-guard is durable:
+ * each run reads prior stall_flags from the log and skips a task already flagged
+ * after its latest task_status, so a fresh task_status (progress) resets the clock
+ * and allows a later re-flag, but a steady-state stall is not re-nudged every tick. */
 export class StallPolicy implements SweepPolicy {
   constructor(private deps: StallDeps) {}
 
   run(now: Date): void {
     const latest = new Map<string, { state: string; owner: string; ts: number }>();
+    // Latest stall_flag ts per task: the durable once-guard. A flag emitted after
+    // the task's latest task_status means this stall window is already flagged.
+    const flaggedAt = new Map<string, number>();
     for (const m of this.deps.store.replay()) {
+      if (m.type === "stall_flag" && m.task) {
+        flaggedAt.set(m.task, Math.max(flaggedAt.get(m.task) ?? 0, Date.parse(m.ts)));
+        continue;
+      }
       if (m.type !== TASK_EVENT_TYPE || !m.task) continue;
       const data = m.parts.find((p) => p.kind === "data")?.data as { state: string; owner?: string };
       const prev = latest.get(m.task);
@@ -33,6 +42,9 @@ export class StallPolicy implements SweepPolicy {
     for (const [taskId, t] of latest) {
       if (t.state !== "working") continue;
       if (now.getTime() - t.ts <= this.deps.stallMs) continue;
+      // Skip if already flagged for THIS stall window (no newer task_status since).
+      const flagTs = flaggedAt.get(taskId);
+      if (flagTs !== undefined && flagTs > t.ts) continue;
       void this.deps.waker.wake(t.owner, `task ${taskId} stalled in working`);
       this.deps.emit({
         id: this.deps.ids.next("m"), task: taskId, from: "broker", to: t.owner, type: "stall_flag",

@@ -1,15 +1,11 @@
-import { isMessage, type AgentCard } from "../index.ts";
+import type { AgentCard } from "../index.ts";
 import type { HttpServer, HttpResponse } from "../../ports/http.ts";
 import {
   A2A_PATHS, A2A_METHOD_MESSAGE_SEND, JSON_RPC_ERRORS,
   type JsonRpcRequest, type MessageSendParams, type MessageSendResult,
 } from "./types.ts";
 import { authorize, type AuthProvider } from "./auth.ts";
-
-/** A valid JSON-RPC id is a string or a number (we don't accept null/missing for requests). */
-function isValidId(id: unknown): id is string | number {
-  return typeof id === "string" || typeof id === "number";
-}
+import { validateRpcMessage } from "./rpc-validate.ts";
 
 /** The application logic an A2A server delegates to (handles received messages). */
 export interface A2ARequestHandler {
@@ -37,47 +33,20 @@ export class A2AServer {
   register(): void {
     this.http.route("GET", A2A_PATHS.agentCard, () => json(200, this.card));
     this.http.route("POST", A2A_PATHS.rpc, async (req) => {
-      let raw: unknown;
-      try {
-        raw = JSON.parse(req.body);
-      } catch {
-        return json(200, this.error(null, JSON_RPC_ERRORS.parseError, "invalid JSON"));
-      }
-      const rpc = raw as Partial<JsonRpcRequest>;
-
-      // Validate the JSON-RPC 2.0 envelope before dispatching.
-      if (rpc === null || typeof rpc !== "object") {
-        return json(200, this.error(null, JSON_RPC_ERRORS.invalidRequest, "request must be a JSON-RPC object"));
-      }
-      if (!isValidId(rpc.id)) {
-        return json(200, this.error(null, JSON_RPC_ERRORS.invalidRequest, "missing or invalid id"));
-      }
-      if (rpc.jsonrpc !== "2.0") {
-        return json(200, this.error(rpc.id, JSON_RPC_ERRORS.invalidRequest, "jsonrpc must be \"2.0\""));
-      }
-      if (typeof rpc.method !== "string") {
-        return json(200, this.error(rpc.id, JSON_RPC_ERRORS.invalidRequest, "method must be a string"));
-      }
-      if (rpc.method !== A2A_METHOD_MESSAGE_SEND) {
-        return json(200, this.error(rpc.id, JSON_RPC_ERRORS.methodNotFound, `unknown method: ${rpc.method}`));
-      }
+      // Shared JSON-RPC envelope + message validation (identical for message/stream).
+      const v = validateRpcMessage(req.body, A2A_METHOD_MESSAGE_SEND);
+      if (v.error) return json(200, this.error(v.id, v.error.code, v.error.message));
 
       // Require + validate the bearer token when an AuthProvider is configured.
       if (this.auth && !authorize(req.headers, this.auth).ok) {
-        return json(200, this.error(rpc.id, JSON_RPC_ERRORS.unauthorized, "missing or invalid bearer token"));
-      }
-
-      // Validate message/send params.
-      const params = rpc.params as Partial<MessageSendParams> | undefined;
-      if (!params || !isMessage(params.message)) {
-        return json(200, this.error(rpc.id, JSON_RPC_ERRORS.invalidParams, "params.message must be a valid Message"));
+        return json(200, this.error(v.id, JSON_RPC_ERRORS.unauthorized, "missing or invalid bearer token"));
       }
 
       try {
-        const result = await this.handler.onMessageSend({ message: params.message });
-        return json(200, { jsonrpc: "2.0", id: rpc.id, result });
+        const result = await this.handler.onMessageSend({ message: v.message! });
+        return json(200, { jsonrpc: "2.0", id: v.id, result });
       } catch (e) {
-        return json(200, this.error(rpc.id, JSON_RPC_ERRORS.internalError, e instanceof Error ? e.message : String(e)));
+        return json(200, this.error(v.id, JSON_RPC_ERRORS.internalError, e instanceof Error ? e.message : String(e)));
       }
     });
   }

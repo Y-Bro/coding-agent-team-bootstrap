@@ -49,7 +49,9 @@ export class ServersRuntime implements Runtime {
     const handle = this.deps.spawner.spawn(profile.command, {
       args: profile.args,
       env: { ...(profile.env ?? {}), TEAM_AGENT_ID: agent.id, TEAM_BROKER_SOCKET: ctx.socketPath },
-      cwd: agent.workdir,
+      // Run the engine at the PROJECT ROOT so it operates on the whole project
+      // (parity with the panes runtime); role files still live under shared/<id>.
+      cwd: ctx.projectRoot,
     });
     this.procs.set(agent.id, handle);
     this.cards.set(agent.id, agent);

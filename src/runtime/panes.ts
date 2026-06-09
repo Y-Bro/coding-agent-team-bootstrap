@@ -18,6 +18,15 @@ const SUBMIT_DELAY_MS = 400;
  */
 const LAUNCH_SETTLE_MS = 1500;
 
+/**
+ * POSIX single-quote escaping: wrap in `'...'` and replace each embedded `'`
+ * with `'\''`. Makes an untrusted config value (env value / arg) a single inert
+ * shell token so spaces, quotes, and metacharacters (`;`, `$()`) can't break out.
+ */
+function shellQuote(s: string): string {
+  return `'${s.replace(/'/g, "'\\''")}'`;
+}
+
 /** v1 runtime: each agent is a tmux pane; wake = send-keys nudge. */
 export class PanesRuntime implements Runtime {
   /** Whether the tmux session exists yet (the first agent creates it). */
@@ -48,9 +57,10 @@ export class PanesRuntime implements Runtime {
   async spawn(agent: AgentCard, ctx: SpawnCtx): Promise<void> {
     const p = this.engines.get(agent.engine);
     if (!p) throw new Error(`unknown engine: ${agent.engine}`);
-    const profileEnv = Object.entries(p.env ?? {}).map(([k, v]) => `${k}=${v} `).join("");
-    const args = p.args?.length ? " " + p.args.join(" ") : "";
-    const launch = `TEAM_AGENT_ID=${agent.id} TEAM_SOCKET=${ctx.socketPath} ${profileEnv}${p.command}${args}`;
+    const profileEnv = Object.entries(p.env ?? {}).map(([k, v]) => `${k}=${shellQuote(v)} `).join("");
+    const args = p.args?.length ? " " + p.args.map(shellQuote).join(" ") : "";
+    // Quote env VALUES + args (untrusted config); the command is a trusted binary name.
+    const launch = `TEAM_AGENT_ID=${shellQuote(agent.id)} TEAM_SOCKET=${shellQuote(ctx.socketPath)} ${profileEnv}${p.command}${args}`;
     // Agents sharing a `window` value share one tmux window (each its own pane);
     // an omitted window defaults to the agent id → one window per agent.
     const windowName = ctx.config.agents.find((a) => a.id === agent.id)?.window ?? agent.id;

@@ -62,6 +62,29 @@ test("spawn launches the agent's CLI in a named pane with env", async () => {
   assert.ok(tmux.calls.some((c) => c.join(" ").includes("claude")));
 });
 
+test("spawn shell-quotes env values + args so shell metacharacters can't break out", async () => {
+  const tmux = new SpyTmux();
+  const evil = {
+    name: "evil", command: "claude", roleFile: "CLAUDE.md", kind: "repl" as const,
+    env: { TOKEN: "a b; rm -rf /", APOS: "it's" },
+    args: ["--flag", "$(whoami)"],
+  };
+  const engines = { get: () => evil, list: () => [evil] } as any;
+  const rt = new PanesRuntime(tmux, "todo", engines, noSleep);
+  await rt.spawn(card, ctx(cfgWith([{ id: "fe-writer" }])));
+  const textSend = tmux.calls.find((c) => c[0] === "send-keys" && c.includes("-l"))!;
+  const launch = textSend[textSend.indexOf("-l") + 1]!;
+
+  // env values + args are single-quoted; dangerous sequences live INSIDE quotes
+  assert.ok(launch.includes("TOKEN='a b; rm -rf /'"), launch);
+  assert.ok(launch.includes("APOS='it'\\''s'"), launch); // POSIX single-quote escaping
+  assert.ok(launch.includes("'$(whoami)'"), launch);
+  assert.ok(launch.includes("'--flag'"), launch);
+  // TEAM_* values are quoted too; the engine command itself stays unquoted
+  assert.ok(launch.includes("TEAM_AGENT_ID='fe-writer'"), launch);
+  assert.ok(/(^| )claude( |$)/.test(launch), `command must stay unquoted: ${launch}`);
+});
+
 test("default (no window): one window per agent, no splits", async () => {
   const tmux = new FakeTmux();
   const rt = new PanesRuntime(tmux, "todo", resolveEngines({}), noSleep);
