@@ -38,7 +38,7 @@ const card: AgentCard = { id: "fe-writer", role: "writer", cli: "claude", engine
 function cfgWith(agents: Array<{ id: string; window?: string }>, layout: Record<string, string> = {}): TeamConfig {
   return { agents: agents.map((a) => ({ id: a.id, window: a.window })), layout } as unknown as TeamConfig;
 }
-function ctx(config: TeamConfig): SpawnCtx { return { config, socketPath: "/tmp/s.sock" }; }
+function ctx(config: TeamConfig): SpawnCtx { return { config, socketPath: "/tmp/s.sock", projectRoot: "/proj" }; }
 
 test("wake sends a one-line nudge into the agent's pane", async () => {
   const tmux = new SpyTmux();

@@ -61,7 +61,7 @@ export class Bootstrapper {
       }
     });
     for (const card of cards) {
-      await this.deps.runtime.spawn(card, { config: this.cfg, socketPath });
+      await this.deps.runtime.spawn(card, { config: this.cfg, socketPath, projectRoot: dirname(teamDir) });
     }
   }
 

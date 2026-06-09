@@ -48,7 +48,9 @@ export class PanesRuntime implements Runtime {
     // Agents sharing a `window` value share one tmux window (each its own pane);
     // an omitted window defaults to the agent id → one window per agent.
     const windowName = ctx.config.agents.find((a) => a.id === agent.id)?.window ?? agent.id;
-    const paneId = this.placePane(windowName, agent.workdir, ctx.config.layout);
+    // Run the engine at the PROJECT ROOT so it operates on the whole project, not
+    // its near-empty shared/<id> dir. The role file still lives in shared/<id>.
+    const paneId = this.placePane(windowName, ctx.projectRoot, ctx.config.layout);
     this.paneIds.set(agent.id, paneId);
     await this.typeAndSubmit(paneId, launch);
   }

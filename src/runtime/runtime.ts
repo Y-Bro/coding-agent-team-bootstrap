@@ -7,6 +7,11 @@ export interface SpawnCtx {
   config: TeamConfig;
   /** Where the broker is listening, so the spawned agent can reach it. */
   socketPath: string;
+  /**
+   * Absolute project root the engine runs in (the resolved config base). Agents
+   * operate on the whole project here; their role file still lives in shared/<id>.
+   */
+  projectRoot: string;
 }
 
 /**
