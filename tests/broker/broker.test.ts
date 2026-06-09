@@ -56,6 +56,23 @@ test("send routes, persists, delivers over the transport, and lands in recipient
   assert.equal(broker.peek("fe-reviewer").length, 0);
 });
 
+test("emitInternal records to inbox + feed + delivers (sweep parity)", async () => {
+  const transport = new SpyTransport();
+  const { broker, fs } = makeBroker(transport);
+  broker.register(card({ id: "lead", role: "lead" }));
+
+  const m: Message = {
+    id: "m-int-1", from: "broker", to: "lead", type: "escalation_request",
+    parts: [{ kind: "text", text: "dead letter" }], ts: "2026-06-06T00:00:00.000Z",
+  };
+  await broker.emitInternal(m);
+
+  assert.ok(broker.peek("lead").some((x) => x.id === "m-int-1"), "in lead inbox");
+  assert.match(fs.read(".team/feed.md"), /dead letter/);
+  assert.match(fs.read(".team/messages.jsonl"), /m-int-1/);
+  assert.ok(transport.delivered.some((d) => d.id === "lead"), "delivered/woken");
+});
+
 test("peek is non-destructive; ack removes only acked ids", async () => {
   const { broker } = makeBroker(new SpyTransport());
   broker.register(card({ id: "lead" }));
