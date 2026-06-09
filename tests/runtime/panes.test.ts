@@ -44,9 +44,15 @@ test("wake sends a one-line nudge into the agent's pane", async () => {
   const tmux = new SpyTmux();
   const rt = new PanesRuntime(tmux, "todo", resolveEngines({}), noSleep);
   await rt.wake("fe-writer", "review_comment from fe-reviewer");
-  const sendKeys = tmux.calls.find((c) => c[0] === "send-keys")!;
-  assert.ok(sendKeys.join(" ").includes("fe-writer"));
-  assert.ok(sendKeys.join(" ").includes("team inbox"));
+  // The literal-text payload is the arg right after `-l`.
+  const textSend = tmux.calls.find((c) => c[0] === "send-keys" && c.includes("-l"))!;
+  const text = textSend[textSend.indexOf("-l") + 1]!;
+  // Must NOT start with `#` — Claude Code treats a leading `#` as "add to memory",
+  // which swallows the nudge so claude agents never act on it.
+  assert.ok(!text.trimStart().startsWith("#"), `nudge must not start with #, got: ${text}`);
+  // Still actionable: tells the agent to read its own inbox.
+  assert.ok(text.includes("team inbox"));
+  assert.ok(text.includes("fe-writer"));
 });
 
 test("spawn launches the agent's CLI in a named pane with env", async () => {
