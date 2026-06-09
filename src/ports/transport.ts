@@ -55,7 +55,16 @@ export class NodeSocketServer implements SocketServer {
           while ((idx = buf.indexOf("\n")) >= 0) {
             const line = buf.slice(0, idx); buf = buf.slice(idx + 1);
             if (line.trim() === "") continue;
-            onMessage(JSON.parse(line), (r) => sock.write(JSON.stringify(r) + "\n"));
+            let parsed: unknown;
+            try {
+              parsed = JSON.parse(line);
+            } catch {
+              // A malformed frame must not crash the daemon's data handler: reply
+              // with a structured error and keep processing the rest of the stream.
+              sock.write(JSON.stringify({ ok: false, error: "malformed JSON frame" }) + "\n");
+              continue;
+            }
+            onMessage(parsed, (r) => sock.write(JSON.stringify(r) + "\n"));
           }
         });
       });
